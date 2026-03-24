@@ -77,8 +77,8 @@ Status as of **2026-03-24**:
 |---|---|---|
 | macOS | Supported | Uses Lima backend by default (`vm.vm_type = "vz"`). |
 | Linux | Supported | Uses Lima backend by default (`vm.vm_type = "qemu"`). |
-| Windows (native) | Supported | Uses Hyper-V backend by default (`SANDBOX_BACKEND=auto`). |
-| Windows via WSL2/VM | Not first-class | v1 target is native Windows runtime. |
+| Windows (native) | Supported (Hyper-V) | Run server natively on Windows; requires Hyper-V + `HYPERV_BASE_VHDX` + OpenSSH client tools. |
+| Windows via WSL2/VM runtime | Not supported (v1) | v1 target is native Windows runtime; WSL2-hosted server runtime is out of scope. |
 Unsupported hosts fail backend preflight with `BACKEND_UNAVAILABLE`.
 
 ## Quick Start
