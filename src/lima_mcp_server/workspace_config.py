@@ -1,9 +1,10 @@
 from __future__ import annotations
 
 import hashlib
+import os
 import sys
 from dataclasses import asdict, dataclass
-from pathlib import Path
+from pathlib import Path, PureWindowsPath
 from typing import Any
 
 try:  # pragma: no cover - py>=3.11 path
@@ -221,6 +222,14 @@ class WorkspaceSettings:
 
 def normalize_workspace_root(workspace_root: str) -> Path:
     return Path(workspace_root).expanduser().resolve()
+
+
+def _is_windows_style_path(value: str) -> bool:
+    raw = value.strip()
+    if raw.startswith("\\\\"):
+        return True
+    parsed = PureWindowsPath(raw)
+    return bool(parsed.drive)
 
 
 def derive_workspace_id(workspace_root: str) -> str:
@@ -563,6 +572,13 @@ def resolve_workspace_settings(
     overrides: dict[str, Any] | None = None,
     global_config_path: Path | None = None,
 ) -> WorkspaceSettings:
+    if sys.platform.lower().startswith("win") and os.name == "nt" and not _is_windows_style_path(workspace_root):
+        raise WorkspaceConfigError(
+            [
+                "workspace_root must be a Windows path (for example: C:\\workspace\\project or \\\\server\\share\\workspace)",
+            ]
+        )
+
     root = normalize_workspace_root(workspace_root)
     if not root.exists():
         raise WorkspaceConfigError([f"workspace_root does not exist: {root}"])

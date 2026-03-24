@@ -22,12 +22,12 @@ class FakeBackend:
         self.live_rows = []
         self.shell_result = CommandResult(args=[], exit_code=0, stdout="", stderr="", duration_ms=1)
 
-    def create_instance(self, lima_name: str, vm_spec: VmCreateSpec) -> CommandResult:
-        self.calls.append(("create", lima_name))
+    def create_instance(self, backend_instance_name: str, vm_spec: VmCreateSpec) -> CommandResult:
+        self.calls.append(("create", backend_instance_name))
         return CommandResult(args=[], exit_code=0, stdout="", stderr="", duration_ms=1)
 
-    def start_instance(self, lima_name: str) -> CommandResult:
-        self.calls.append(("start", lima_name))
+    def start_instance(self, backend_instance_name: str) -> CommandResult:
+        self.calls.append(("start", backend_instance_name))
         return CommandResult(args=[], exit_code=0, stdout="", stderr="", duration_ms=1)
 
     def list_instances(self):
@@ -36,25 +36,28 @@ class FakeBackend:
     def extract_ssh_port(self, instance):
         return instance.get("sshLocalPort")
 
-    def shell_command(self, lima_name: str, command: str, timeout_seconds: int) -> CommandResult:
-        self.calls.append(("shell", lima_name))
+    def shell_command(self, backend_instance_name: str, command: str, timeout_seconds: int) -> CommandResult:
+        self.calls.append(("shell", backend_instance_name))
         return self.shell_result
 
-    def copy_to_instance(self, lima_name: str, local_path: str, remote_path: str) -> CommandResult:
-        self.calls.append(("copy_to", lima_name))
+    def copy_to_instance(self, backend_instance_name: str, local_path: str, remote_path: str) -> CommandResult:
+        self.calls.append(("copy_to", backend_instance_name))
         return CommandResult(args=[], exit_code=0, stdout="", stderr="", duration_ms=1)
 
-    def copy_from_instance(self, lima_name: str, remote_path: str, local_path: str) -> CommandResult:
-        self.calls.append(("copy_from", lima_name))
+    def copy_from_instance(self, backend_instance_name: str, remote_path: str, local_path: str) -> CommandResult:
+        self.calls.append(("copy_from", backend_instance_name))
         return CommandResult(args=[], exit_code=0, stdout="", stderr="", duration_ms=1)
 
-    def stop_instance(self, lima_name: str, force: bool = False) -> CommandResult:
-        self.calls.append(("stop", lima_name))
+    def stop_instance(self, backend_instance_name: str, force: bool = False) -> CommandResult:
+        self.calls.append(("stop", backend_instance_name))
         return CommandResult(args=[], exit_code=0, stdout="", stderr="", duration_ms=1)
 
-    def delete_instance(self, lima_name: str, force: bool = False) -> CommandResult:
-        self.calls.append(("delete", lima_name))
+    def delete_instance(self, backend_instance_name: str, force: bool = False) -> CommandResult:
+        self.calls.append(("delete", backend_instance_name))
         return CommandResult(args=[], exit_code=0, stdout="", stderr="", duration_ms=1)
+
+    def build_shell_command_args(self, backend_instance_name: str, command: str) -> list[str]:
+        return ["backend-shell", backend_instance_name, command]
 
 
 def make_service(tmp_path: Path, backend: FakeBackend | None = None) -> LeaseService:
@@ -93,7 +96,7 @@ def test_cap_exceeded(tmp_path: Path) -> None:
                 "last_used_at": future,
                 "owner_session": "local",
                 "ssh_port": None,
-                "lima_name": f"agent-{i}",
+                "backend_instance_name": f"agent-{i}",
             }
         )
 
@@ -143,7 +146,7 @@ def test_backend_unavailable_returns_structured_error(tmp_path: Path) -> None:
 
     assert result["error_code"] == "BACKEND_UNAVAILABLE"
     assert "details" in result
-    assert result["details"]["probable_cause"] == "limactl_missing"
+    assert result["details"]["probable_cause"] == "backend_binary_missing"
     assert result["details"]["next_steps"]
 
 
@@ -158,15 +161,15 @@ def test_backend_unavailable_on_unsupported_host_returns_guidance(tmp_path: Path
 
     assert result["error_code"] == "BACKEND_UNAVAILABLE"
     assert result["details"]["probable_cause"] == "unsupported_host_os"
-    assert any("macOS or Linux" in step for step in result["details"]["next_steps"])
+    assert any("supported" in step for step in result["details"]["next_steps"])
 
 
 def test_create_instance_dependency_failure_returns_guided_message(tmp_path: Path) -> None:
     backend = FakeBackend()
 
-    def fail_create(lima_name: str, vm_spec: VmCreateSpec) -> CommandResult:  # noqa: ARG001
+    def fail_create(backend_instance_name: str, vm_spec: VmCreateSpec) -> CommandResult:  # noqa: ARG001
         raise BackendCommandError(
-            command=["limactl", "create", "--name", lima_name],
+            command=["limactl", "create", "--name", backend_instance_name],
             exit_code=1,
             stdout="",
             stderr="qemu-system-x86_64: command not found",
@@ -178,7 +181,7 @@ def test_create_instance_dependency_failure_returns_guided_message(tmp_path: Pat
 
     result = service.create_instance(workspace_root=str(tmp_path), ttl_minutes=30, auto_bootstrap=False)
 
-    assert result["error_code"] == "LIMA_COMMAND_FAILED"
+    assert result["error_code"] == "BACKEND_COMMAND_FAILED"
     guidance = result["details"]["guidance"]
     assert guidance["probable_cause"] == "host_vm_dependency_missing"
     assert any("QEMU" in step for step in guidance["next_steps"])

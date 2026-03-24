@@ -9,7 +9,9 @@ src/lima_mcp_server/
   runtime.py           # docker command builders
   workspace_config.py  # config schema, defaults, and validation
   backend/
-    lima.py            # Lima backend implementation
+    lima.py            # Lima backend implementation (macOS/Linux)
+    hyperv.py          # Hyper-V backend implementation (Windows)
+    factory.py         # backend selection and wiring
   db.py                # sqlite persistence for leases/tasks
   errors.py            # structured error payload helper
   sweeper.py           # expired lease cleanup loop

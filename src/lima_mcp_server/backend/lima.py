@@ -5,58 +5,9 @@ import shutil
 import subprocess
 import sys
 import time
-from dataclasses import dataclass
 from typing import Any
 
-
-@dataclass
-class CommandResult:
-    args: list[str]
-    exit_code: int
-    stdout: str
-    stderr: str
-    duration_ms: int
-
-
-class BackendUnavailableError(RuntimeError):
-    pass
-
-
-class BackendCommandError(RuntimeError):
-    def __init__(
-        self,
-        command: list[str],
-        exit_code: int,
-        stdout: str,
-        stderr: str,
-        duration_ms: int,
-        message: str = "Lima command failed",
-    ) -> None:
-        super().__init__(message)
-        self.command = command
-        self.exit_code = exit_code
-        self.stdout = stdout
-        self.stderr = stderr
-        self.duration_ms = duration_ms
-
-    def details(self) -> dict[str, Any]:
-        return {
-            "command": self.command,
-            "exit_code": self.exit_code,
-            "stdout": self.stdout,
-            "stderr": self.stderr,
-            "duration_ms": self.duration_ms,
-        }
-
-
-@dataclass(frozen=True)
-class VmCreateSpec:
-    cpus: int
-    memory_gib: float
-    disk_gib: float
-    template: str
-    arch: str | None = None
-    vm_type: str | None = None
+from .base import BackendCommandError, BackendUnavailableError, CommandResult, VmCreateSpec
 
 
 class LimaBackend:
@@ -134,14 +85,14 @@ class LimaBackend:
             )
         return result
 
-    def create_instance(self, lima_name: str, vm_spec: VmCreateSpec, timeout_seconds: int = 600) -> CommandResult:
+    def create_instance(self, backend_instance_name: str, vm_spec: VmCreateSpec, timeout_seconds: int = 600) -> CommandResult:
         self._ensure_available()
 
         args = [
             "limactl",
             "create",
             "--name",
-            lima_name,
+            backend_instance_name,
             "--tty=false",
             f"--cpus={vm_spec.cpus}",
             f"--memory={vm_spec.memory_gib}",
@@ -155,9 +106,9 @@ class LimaBackend:
         args.append(vm_spec.template)
         return self._run(args, timeout=timeout_seconds)
 
-    def start_instance(self, lima_name: str, timeout_seconds: int = 600) -> CommandResult:
+    def start_instance(self, backend_instance_name: str, timeout_seconds: int = 600) -> CommandResult:
         self._ensure_available()
-        return self._run(["limactl", "start", lima_name], timeout=timeout_seconds)
+        return self._run(["limactl", "start", backend_instance_name], timeout=timeout_seconds)
 
     def list_instances(self) -> list[dict[str, Any]]:
         self._ensure_available()
@@ -187,33 +138,36 @@ class LimaBackend:
 
         return []
 
-    def shell_command(self, lima_name: str, command: str, timeout_seconds: int) -> CommandResult:
+    def build_shell_command_args(self, backend_instance_name: str, command: str) -> list[str]:
+        return ["limactl", "shell", backend_instance_name, "--", "sh", "-lc", command]
+
+    def shell_command(self, backend_instance_name: str, command: str, timeout_seconds: int) -> CommandResult:
         self._ensure_available()
-        args = ["limactl", "shell", lima_name, "--", "sh", "-lc", command]
+        args = self.build_shell_command_args(backend_instance_name=backend_instance_name, command=command)
         return self._run(args, timeout=timeout_seconds, check=False)
 
-    def copy_to_instance(self, lima_name: str, local_path: str, remote_path: str) -> CommandResult:
+    def copy_to_instance(self, backend_instance_name: str, local_path: str, remote_path: str) -> CommandResult:
         self._ensure_available()
-        return self._run(["limactl", "copy", local_path, f"{lima_name}:{remote_path}"])
+        return self._run(["limactl", "copy", local_path, f"{backend_instance_name}:{remote_path}"])
 
-    def copy_from_instance(self, lima_name: str, remote_path: str, local_path: str) -> CommandResult:
+    def copy_from_instance(self, backend_instance_name: str, remote_path: str, local_path: str) -> CommandResult:
         self._ensure_available()
-        return self._run(["limactl", "copy", f"{lima_name}:{remote_path}", local_path])
+        return self._run(["limactl", "copy", f"{backend_instance_name}:{remote_path}", local_path])
 
-    def stop_instance(self, lima_name: str, force: bool = False, timeout_seconds: int = 300) -> CommandResult:
+    def stop_instance(self, backend_instance_name: str, force: bool = False, timeout_seconds: int = 300) -> CommandResult:
         self._ensure_available()
         args = ["limactl", "stop"]
         if force:
             args.append("--force")
-        args.append(lima_name)
+        args.append(backend_instance_name)
         return self._run(args, timeout=timeout_seconds)
 
-    def delete_instance(self, lima_name: str, force: bool = False, timeout_seconds: int = 300) -> CommandResult:
+    def delete_instance(self, backend_instance_name: str, force: bool = False, timeout_seconds: int = 300) -> CommandResult:
         self._ensure_available()
         args = ["limactl", "delete"]
         if force:
             args.append("--force")
-        args.append(lima_name)
+        args.append(backend_instance_name)
         return self._run(args, timeout=timeout_seconds)
 
     @staticmethod

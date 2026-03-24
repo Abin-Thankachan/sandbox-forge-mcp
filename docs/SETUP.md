@@ -4,10 +4,13 @@ This guide is the standard setup path for contributors.
 
 ## 1. Prerequisites
 
-- macOS or Linux
+- macOS, Linux, or Windows
 - Python 3.11+
 - [uv](https://github.com/astral-sh/uv)
-- Lima (`limactl`) in your `PATH`
+
+Backend prerequisites:
+- macOS/Linux: Lima (`limactl`) in `PATH`
+- Windows: Hyper-V PowerShell cmdlets (`New-VM`, `New-VHD`) and OpenSSH client (`ssh`, `scp`)
 
 On macOS (Homebrew):
 
@@ -23,6 +26,15 @@ On Linux (example package sources vary by distro):
 limactl --version
 ```
 
+On Windows (PowerShell):
+
+```powershell
+Get-Command New-VM
+Get-Command New-VHD
+ssh -V
+scp -V
+```
+
 Host defaults:
 - macOS uses `vm.vm_type = "vz"` by default.
 - Linux uses `vm.vm_type = "qemu"` by default.
@@ -30,6 +42,7 @@ Host defaults:
 Important:
 - Host VM tooling is not auto-installed by this project.
 - On Linux, install distro-specific Lima prerequisites yourself (including any required QEMU/KVM components).
+- On Windows, configure Hyper-V and set `HYPERV_BASE_VHDX` to an existing base image path.
 - This project can auto-install Docker inside the created VM during workspace bootstrap, but it does not provision host virtualization dependencies.
 
 ## 2. Clone and Install
@@ -89,7 +102,7 @@ bridge_to_compose_network = true
 ```
 
 Then use:
-- `lima_validate_image(...)` before test runs
+- `validate_image(...)` before test runs
 - `docker_build(...)` for auto cache hit/miss + metadata labels
 
 ## 7. Common Troubleshooting
@@ -98,6 +111,12 @@ Then use:
 
 - Confirm install: `limactl --version`
 - Ensure shell profile exports the correct PATH
+
+## Hyper-V cmdlets unavailable
+
+- Confirm Hyper-V feature is enabled on Windows.
+- Verify with: `Get-Command New-VM` and `Get-Command New-VHD`.
+- Ensure `HYPERV_BASE_VHDX` points to an existing `.vhdx` base image.
 
 ## `create_instance` appears hung
 

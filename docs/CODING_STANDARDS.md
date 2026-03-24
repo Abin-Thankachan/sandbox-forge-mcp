@@ -12,7 +12,7 @@ This project prioritizes stable tool contracts and predictable error behavior.
 
 - `server.py`: tool registration and transport wiring only
 - `service.py`: orchestration/business logic and response shaping
-- `backend/`: backend-specific command execution (Lima today, extendable to EC2 later)
+- `backend/`: backend-specific command execution (Lima/Hyper-V today, extendable further)
 - `runtime.py`: command construction helpers, no orchestration state
 - `workspace_config.py`: schema/defaults/validation
 
@@ -29,7 +29,7 @@ Do not return raw exceptions to callers.
 
 ## API Compatibility
 
-- Keep existing tool names and required fields backward compatible.
+- Keep existing tool names and required fields stable unless intentionally shipping a breaking release.
 - When adding fields, prefer additive responses.
 - If behavior changes, update `README.md` and tests.
 

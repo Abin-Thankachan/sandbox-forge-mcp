@@ -1,11 +1,11 @@
 # SandboxForge MCP
 
-Python MCP server (FastMCP) with dual transports (`stdio` + Streamable HTTP on localhost) and workspace-scoped Lima lifecycle tools.
+Python MCP server (FastMCP) with dual transports (`stdio` + Streamable HTTP on localhost) and workspace-scoped virtualization lifecycle tools.
 
 ## Why This Project
 
 This server provides a predictable local orchestration surface for:
-- Ephemeral Lima instances
+- Ephemeral VM instances (Lima on macOS/Linux, Hyper-V on Windows)
 - Workspace sync in/out
 - Docker runtime bootstrap inside the VM
 - Infra helpers (MySQL/Redis/network setup)
@@ -15,7 +15,7 @@ This server provides a predictable local orchestration surface for:
 
 SandboxForge is **VM-first isolation**, not Docker-only host isolation.
 
-- Isolation boundary: disposable Lima Linux VM
+- Isolation boundary: disposable VM guest
 - Workload runtime inside that boundary: Docker/Compose
 - Host remains cleaner because Docker engine and app containers run in the VM
 - In short: this project creates **VM-contained container runtimes**, not just host Docker namespaces
@@ -29,7 +29,9 @@ Use this map if you are an agent (or a new contributor) trying to understand the
 - Architectural intent: [docs/PROJECT_STRUCTURE.md](docs/PROJECT_STRUCTURE.md)
 - Tool registration and transport wiring: [src/lima_mcp_server/server.py](src/lima_mcp_server/server.py)
 - Core orchestration and lifecycle rules: [src/lima_mcp_server/service.py](src/lima_mcp_server/service.py)
-- Lima backend execution layer: [src/lima_mcp_server/backend/lima.py](src/lima_mcp_server/backend/lima.py)
+- Backend execution layers:
+  - [src/lima_mcp_server/backend/lima.py](src/lima_mcp_server/backend/lima.py)
+  - [src/lima_mcp_server/backend/hyperv.py](src/lima_mcp_server/backend/hyperv.py)
 - Docker command builders: [src/lima_mcp_server/runtime.py](src/lima_mcp_server/runtime.py)
 - Config schema/defaults/validation: [src/lima_mcp_server/workspace_config.py](src/lima_mcp_server/workspace_config.py)
 - Persistence model (leases/tasks): [src/lima_mcp_server/db.py](src/lima_mcp_server/db.py)
@@ -40,17 +42,19 @@ Use this map if you are an agent (or a new contributor) trying to understand the
 1. An MCP client calls a tool exposed by this server (`stdio` or Streamable HTTP).
 2. `LeaseService` validates workspace config and enforces lease/task lifecycle rules.
 3. `LeaseStore` (SQLite) persists instance leases and background task state.
-4. `LimaBackend` executes `limactl` operations (create/start/shell/copy/stop/delete).
-5. Docker/Compose commands run inside the leased Lima VM (Docker is runtime, VM is isolation boundary), with optional MySQL/Redis helper setup.
+4. The selected backend executes VM operations (create/start/shell/copy/stop/delete).
+5. Docker/Compose commands run inside the leased VM (Docker is runtime, VM is isolation boundary), with optional MySQL/Redis helper setup.
 6. A sweeper loop automatically expires and cleans old leases based on TTL.
 
 ## System Requirements
 
 Current baseline requirements:
-- macOS or Linux host
+- macOS, Linux, or Windows host
 - Python `3.11+`
 - [uv](https://github.com/astral-sh/uv)
-- Lima installed and `limactl` available in `PATH`
+- Virtualization backend prerequisites for your host:
+  - macOS/Linux: Lima (`limactl`)
+  - Windows: Hyper-V PowerShell cmdlets + OpenSSH client
 - Ability to allocate at least the default VM shape:
   - `1` CPU
   - `2 GiB` RAM
@@ -62,7 +66,8 @@ Optional for containerized deployment:
 
 Important:
 - Host VM tooling is not auto-installed by SandboxForge MCP.
-- On Linux hosts, ensure Lima prerequisites for your distro are installed (for example QEMU/KVM support as required by your Lima setup).
+- On Linux hosts, ensure Lima prerequisites for your distro are installed (for example QEMU/KVM support).
+- On Windows hosts, configure Hyper-V and set `HYPERV_BASE_VHDX`.
 
 ## OS Support Status
 
@@ -70,10 +75,10 @@ Status as of **2026-03-24**:
 
 | OS | Status | Notes |
 |---|---|---|
-| macOS | Supported | Default `vm.vm_type` is `vz`. |
-| Linux | Supported | Default `vm.vm_type` is `qemu`. |
-| Windows (native) | Not supported | Not working as a supported target yet. |
-| Windows via WSL2/VM | Not supported | Not working as a supported target yet. |
+| macOS | Supported | Uses Lima backend by default (`vm.vm_type = "vz"`). |
+| Linux | Supported | Uses Lima backend by default (`vm.vm_type = "qemu"`). |
+| Windows (native) | Supported | Uses Hyper-V backend by default (`SANDBOX_BACKEND=auto`). |
+| Windows via WSL2/VM | Not first-class | v1 target is native Windows runtime. |
 Unsupported hosts fail backend preflight with `BACKEND_UNAVAILABLE`.
 
 ## Quick Start
@@ -126,8 +131,8 @@ Security default remains loopback-only. Non-loopback bind is now explicitly gate
 The compose setup enables this for container usage (`MCP_HTTP_HOST=0.0.0.0`), while non-container runs remain loopback-only by default.
 
 Note:
-- Lima lifecycle tools require `limactl` to be available inside the container `PATH`.
-- If `limactl` is not present, the server still starts, but Lima-backed tools return `BACKEND_UNAVAILABLE`.
+- Backend lifecycle tools require host-specific virtualization dependencies to be available.
+- If backend prerequisites are missing, the server still starts, but VM-backed tools return `BACKEND_UNAVAILABLE`.
 
 ## Developer Docs
 
@@ -177,7 +182,7 @@ Notes:
 ## Image Validation and Caching
 
 New tool:
-- `lima_validate_image(instance_id, image_name, workspace_root?, checks?)`
+- `validate_image(instance_id, image_name, workspace_root?, checks?)`
 
 `docker_build` rollout:
 - Computes workspace state (`git`, dependency hash, content hash)
@@ -211,7 +216,15 @@ tag_format = "{image}:{git_short}-{deps_hash}"
 - `MCP_HTTP_ALLOW_NON_LOOPBACK` (default `0`; set `1` to allow hosts like `0.0.0.0`)
 - `MCP_HTTP_PORT` (default `8765`)
 - `LEASE_DB_PATH` (default `state/leases.db`)
-- `LIMA_SWEEPER_INTERVAL_SECONDS` (default `60`)
+- `SANDBOX_SWEEPER_INTERVAL_SECONDS` (default `60`)
+- `SANDBOX_BACKEND` (`auto`, `lima`, `hyperv`; default `auto`)
+- `HYPERV_SWITCH_NAME` (default `Default Switch`)
+- `HYPERV_BASE_VHDX` (required for Hyper-V backend)
+- `HYPERV_STORAGE_DIR` (default `state/hyperv`)
+- `HYPERV_SSH_USER` (default `ubuntu`)
+- `HYPERV_SSH_KEY_PATH` (optional)
+- `HYPERV_SSH_PORT` (default `22`)
+- `HYPERV_BOOT_TIMEOUT_SECONDS` (default `180`)
 
 ## License
 

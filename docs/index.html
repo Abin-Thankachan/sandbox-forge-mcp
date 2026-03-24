@@ -113,7 +113,7 @@
                     True VM-isolated sandboxes with one <span class="text-primary">MCP call.</span>
 </h1>
 <p class="text-lg md:text-xl text-on-surface-variant max-w-2xl leading-relaxed">
-                    Stop compromising with shared kernels. SandboxForge leverages Lima for full kernel-level separation, ensuring your build and test workflows never touch your host.
+                    Stop compromising with shared kernels. SandboxForge leverages pluggable VM backends for full kernel-level separation, ensuring your build and test workflows never touch your host.
                 </p>
 <div class="flex flex-col sm:flex-row gap-4 pt-4">
 <a class="bg-primary-container text-on-primary-container px-8 py-4 rounded-xl font-bold text-base shadow-sm hover:shadow-md transition-all active:scale-95 flex items-center justify-center gap-2" href="#quick-start">
@@ -136,7 +136,7 @@
 <span class="text-[10px] font-mono text-slate-500 uppercase tracking-widest">mcp-protocol</span>
 </div>
 <div class="p-6 overflow-x-auto code-block">
-<pre class="font-mono text-sm leading-relaxed"><span class="text-blue-400">create_vm_sandbox</span>(<span class="text-emerald-400">kernel</span>=<span class="text-orange-300">"linux-6.x"</span>, <span class="text-emerald-400">provider</span>=<span class="text-orange-300">"lima"</span>)
+<pre class="font-mono text-sm leading-relaxed"><span class="text-blue-400">create_vm_sandbox</span>(<span class="text-emerald-400">kernel</span>=<span class="text-orange-300">"linux-6.x"</span>, <span class="text-emerald-400">provider</span>=<span class="text-orange-300">"auto"</span>)
 <span class="text-slate-500"># VM is now running with isolated resources</span>
 <span class="text-blue-400">provision_docker</span>(<span class="text-emerald-400">isolated</span>=<span class="text-orange-300">True</span>)
 <span class="text-blue-400">exec_in_sandbox</span>(<span class="text-emerald-400">cmd</span>=<span class="text-orange-300">"docker run --rm app:latest"</span>)</pre>
@@ -230,13 +230,13 @@
 <span class="material-symbols-outlined" data-icon="verified_user">verified_user</span>
 </div>
 <h3 class="text-xl font-bold mb-3 font-headline">Full Kernel Separation</h3>
-<p class="text-on-surface-variant text-sm leading-relaxed">Each sandbox runs its own guest OS kernel via Lima, providing a hard security boundary between tasks and host.</p>
+<p class="text-on-surface-variant text-sm leading-relaxed">Each sandbox runs its own guest OS kernel via a backend VM, providing a hard security boundary between tasks and host.</p>
 </div>
 <div class="bg-surface-container-lowest p-6 rounded-2xl border border-outline-variant/20 shadow-[0_4px_12px_rgba(0,0,0,0.03)] hover:shadow-lg transition-all duration-300">
 <div class="w-12 h-12 rounded-xl bg-primary/10 flex items-center justify-center text-primary mb-6">
 <span class="material-symbols-outlined" data-icon="auto_delete">auto_delete</span>
 </div>
-<h3 class="text-xl font-bold mb-3 font-headline">Ephemeral Lima Instances</h3>
+<h3 class="text-xl font-bold mb-3 font-headline">Ephemeral VM Instances</h3>
 <p class="text-on-surface-variant text-sm leading-relaxed">Lightweight VMs that spin up in seconds and vanish completely once the MCP session ends.</p>
 </div>
 <div class="bg-surface-container-lowest p-6 rounded-2xl border border-outline-variant/20 shadow-[0_4px_12px_rgba(0,0,0,0.03)] hover:shadow-lg transition-all duration-300">
@@ -287,7 +287,7 @@
 <div class="flex-1 bg-surface-container-lowest p-8 rounded-2xl relative z-10 border border-outline-variant/20 shadow-sm">
 <span class="text-6xl font-black text-primary/5 absolute top-4 right-4 leading-none">02</span>
 <h4 class="text-lg font-bold mb-2 font-headline">VM Provision</h4>
-<p class="text-on-surface-variant text-sm leading-relaxed">Spins up a specialized Lima VM with a dedicated kernel and isolated networking stack.</p>
+<p class="text-on-surface-variant text-sm leading-relaxed">Spins up a specialized backend VM with a dedicated kernel and isolated networking stack.</p>
 </div>
 <!-- Step 3 -->
 <div class="flex-1 bg-surface-container-lowest p-8 rounded-2xl relative z-10 border border-outline-variant/20 shadow-sm">
@@ -341,7 +341,7 @@
 <span class="material-symbols-outlined transition-transform group-open:rotate-180" data-icon="expand_more">expand_more</span>
 </summary>
 <div class="px-6 pb-6 text-on-surface-variant text-sm leading-relaxed">
-                        Docker containers share the host machine's kernel. A security flaw in the kernel can lead to a container escape. By using a VM (via Lima), we provide a hard virtualization boundary: the VM has its own kernel, making it significantly harder for malicious code to reach your host system.
+                        Docker containers share the host machine's kernel. A security flaw in the kernel can lead to a container escape. By using a VM (via a backend VM), we provide a hard virtualization boundary: the VM has its own kernel, making it significantly harder for malicious code to reach your host system.
                     </div>
 </details>
 <details class="group bg-surface-container-low rounded-2xl overflow-hidden [&amp;_summary::-webkit-details-marker]:hidden">

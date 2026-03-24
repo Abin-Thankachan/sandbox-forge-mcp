@@ -5,7 +5,7 @@ import sys
 import threading
 from typing import Any, Callable
 
-from .backend.lima import LimaBackend
+from .backend.factory import build_backend
 from .config import ServerConfig
 from .db import LeaseStore
 from .service import LeaseService
@@ -45,7 +45,7 @@ def _register_tools(app: Any, service: LeaseService) -> None:
         return service.validate_workspace_config(workspace_root=workspace_root, overrides=overrides)
 
     @app.tool()
-    def lima_validate_image(
+    def validate_image(
         instance_id: str,
         image_name: str,
         workspace_root: str | None = None,
@@ -310,11 +310,16 @@ def main() -> None:
     _configure_logging()
     config = ServerConfig.from_env()
 
-    backend = LimaBackend()
+    try:
+        backend = build_backend(config)
+    except ValueError as exc:
+        logger.error("%s", exc)
+        raise
+
     if not backend.available:
-        logger.warning("lima backend unavailable at startup: %s", backend.unavailable_reason)
+        logger.warning("%s backend unavailable at startup: %s", backend.backend_name, backend.unavailable_reason)
     else:
-        logger.info("lima backend ready: %s", backend.version)
+        logger.info("%s backend ready: %s", backend.backend_name, backend.version)
 
     store = LeaseStore(config.db_path)
     service = LeaseService(store=store, backend=backend, config=config)

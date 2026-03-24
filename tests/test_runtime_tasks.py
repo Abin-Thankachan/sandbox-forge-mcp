@@ -32,7 +32,7 @@ class BackendStub:
         self.image_labels_output: str | None = None
         self.image_created_output: str = "2026-03-24T10:00:00Z"
 
-    def shell_command(self, lima_name: str, command: str, timeout_seconds: int) -> CommandResult:
+    def shell_command(self, backend_instance_name: str, command: str, timeout_seconds: int) -> CommandResult:
         self.last_shell = command
         if "df -Pk /" in command:
             return CommandResult(args=[], exit_code=0, stdout="10485760\n", stderr="", duration_ms=4)
@@ -45,21 +45,24 @@ class BackendStub:
                 return CommandResult(args=[], exit_code=0, stdout=f"{self.image_created_output}\n", stderr="", duration_ms=4)
         return self.shell_result
 
-    def copy_from_instance(self, lima_name: str, remote_path: str, local_path: str) -> CommandResult:
-        self.copy_from_calls.append((lima_name, remote_path, local_path))
+    def copy_from_instance(self, backend_instance_name: str, remote_path: str, local_path: str) -> CommandResult:
+        self.copy_from_calls.append((backend_instance_name, remote_path, local_path))
         return CommandResult(args=[], exit_code=0, stdout="", stderr="", duration_ms=1)
 
-    def copy_to_instance(self, lima_name: str, local_path: str, remote_path: str) -> CommandResult:
+    def copy_to_instance(self, backend_instance_name: str, local_path: str, remote_path: str) -> CommandResult:
         return CommandResult(args=[], exit_code=0, stdout="", stderr="", duration_ms=1)
 
-    def stop_instance(self, lima_name: str, force: bool = False) -> CommandResult:
+    def stop_instance(self, backend_instance_name: str, force: bool = False) -> CommandResult:
         return CommandResult(args=[], exit_code=0, stdout="", stderr="", duration_ms=1)
 
-    def delete_instance(self, lima_name: str, force: bool = False) -> CommandResult:
+    def delete_instance(self, backend_instance_name: str, force: bool = False) -> CommandResult:
         return CommandResult(args=[], exit_code=0, stdout="", stderr="", duration_ms=1)
 
     def list_instances(self):
         return []
+
+    def build_shell_command_args(self, backend_instance_name: str, command: str) -> list[str]:
+        return ["backend-shell", backend_instance_name, command]
 
 
 def make_service(tmp_path: Path) -> tuple[LeaseService, BackendStub]:
@@ -79,7 +82,7 @@ def make_service(tmp_path: Path) -> tuple[LeaseService, BackendStub]:
             "last_used_at": to_iso8601(utc_now()),
             "owner_session": "local",
             "ssh_port": 2222,
-            "lima_name": "agent-run",
+            "backend_instance_name": "agent-run",
             "workspace_root": str(tmp_path),
             "workspace_id": "ws_test",
             "runtime_name": "docker",

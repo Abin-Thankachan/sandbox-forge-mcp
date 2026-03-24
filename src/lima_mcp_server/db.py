@@ -17,7 +17,7 @@ LEASE_FIELDS = (
     "last_used_at",
     "owner_session",
     "ssh_port",
-    "lima_name",
+    "backend_instance_name",
     "runtime_name",
     "runtime_ready",
     "docker_command",
@@ -72,7 +72,7 @@ class LeaseStore:
                     last_used_at TEXT NOT NULL,
                     owner_session TEXT,
                     ssh_port INTEGER,
-                    lima_name TEXT NOT NULL,
+                    backend_instance_name TEXT NOT NULL,
                     runtime_name TEXT,
                     runtime_ready INTEGER NOT NULL DEFAULT 0,
                     docker_command TEXT
@@ -83,6 +83,16 @@ class LeaseStore:
                 conn.execute("ALTER TABLE leases ADD COLUMN workspace_root TEXT")
             if not self._has_column(conn, "leases", "workspace_id"):
                 conn.execute("ALTER TABLE leases ADD COLUMN workspace_id TEXT")
+            if not self._has_column(conn, "leases", "backend_instance_name"):
+                conn.execute("ALTER TABLE leases ADD COLUMN backend_instance_name TEXT")
+            if self._has_column(conn, "leases", "lima_name"):
+                conn.execute(
+                    """
+                    UPDATE leases
+                    SET backend_instance_name = COALESCE(NULLIF(backend_instance_name, ''), lima_name)
+                    WHERE backend_instance_name IS NULL OR backend_instance_name = ''
+                    """
+                )
             if not self._has_column(conn, "leases", "runtime_name"):
                 conn.execute("ALTER TABLE leases ADD COLUMN runtime_name TEXT")
             if not self._has_column(conn, "leases", "runtime_ready"):
@@ -120,6 +130,7 @@ class LeaseStore:
 
     def create_lease(self, lease: dict[str, Any]) -> None:
         normalized = dict(lease)
+        normalized.setdefault("backend_instance_name", normalized.get("lima_name"))
         normalized.setdefault("workspace_root", None)
         normalized.setdefault("workspace_id", None)
         normalized.setdefault("runtime_name", None)
@@ -137,6 +148,7 @@ class LeaseStore:
 
     def upsert_lease(self, lease: dict[str, Any]) -> None:
         normalized = dict(lease)
+        normalized.setdefault("backend_instance_name", normalized.get("lima_name"))
         normalized.setdefault("workspace_root", None)
         normalized.setdefault("workspace_id", None)
         normalized.setdefault("runtime_name", None)

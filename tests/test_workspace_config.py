@@ -253,3 +253,16 @@ def test_workspace_config_explicit_vm_type_override_is_preserved(tmp_path: Path,
     settings = resolve_workspace_settings(workspace_root=str(workspace))
 
     assert settings.vm.vm_type == "vz"
+
+
+def test_workspace_config_rejects_non_windows_path_on_windows_host(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr("lima_mcp_server.workspace_config.sys.platform", "win32")
+    monkeypatch.setattr("lima_mcp_server.workspace_config.os.name", "nt")
+
+    with pytest.raises(WorkspaceConfigError) as exc:
+        resolve_workspace_settings(workspace_root=str(tmp_path))
+
+    assert any("must be a Windows path" in err for err in exc.value.errors)

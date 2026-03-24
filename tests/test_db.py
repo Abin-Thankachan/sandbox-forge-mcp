@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import sqlite3
 from pathlib import Path
 
 from lima_mcp_server.config import ServerConfig
@@ -20,11 +21,11 @@ class CleanupBackend:
     def list_instances(self):
         return []
 
-    def stop_instance(self, lima_name: str, force: bool = False):
-        self.actions.append(f"stop:{lima_name}")
+    def stop_instance(self, backend_instance_name: str, force: bool = False):
+        self.actions.append(f"stop:{backend_instance_name}")
 
-    def delete_instance(self, lima_name: str, force: bool = False):
-        self.actions.append(f"delete:{lima_name}")
+    def delete_instance(self, backend_instance_name: str, force: bool = False):
+        self.actions.append(f"delete:{backend_instance_name}")
 
 
 def make_store(tmp_path: Path) -> LeaseStore:
@@ -46,7 +47,7 @@ def test_lease_create_and_update(tmp_path: Path) -> None:
             "last_used_at": now,
             "owner_session": "local",
             "ssh_port": 2222,
-            "lima_name": "agent-abc",
+            "backend_instance_name": "agent-abc",
         }
     )
 
@@ -75,7 +76,7 @@ def test_sweeper_expires_and_cleans(tmp_path: Path) -> None:
             "last_used_at": "2020-01-01T00:00:00Z",
             "owner_session": "local",
             "ssh_port": None,
-            "lima_name": "agent-old",
+            "backend_instance_name": "agent-old",
         }
     )
 
@@ -105,7 +106,7 @@ def test_reconciliation_detects_drift(tmp_path: Path) -> None:
             "last_used_at": "2020-01-01T00:00:00Z",
             "owner_session": "local",
             "ssh_port": None,
-            "lima_name": "agent-live",
+            "backend_instance_name": "agent-live",
         }
     )
 
@@ -131,7 +132,7 @@ def test_task_registry_create_and_update(tmp_path: Path) -> None:
             "last_used_at": now,
             "owner_session": "local",
             "ssh_port": None,
-            "lima_name": "agent-task",
+            "backend_instance_name": "agent-task",
         }
     )
 
@@ -176,7 +177,7 @@ def test_lease_defaults_include_workspace_and_docker_command(tmp_path: Path) -> 
             "last_used_at": now,
             "owner_session": "local",
             "ssh_port": None,
-            "lima_name": "agent-defaults",
+            "backend_instance_name": "agent-defaults",
         }
     )
 
@@ -185,3 +186,56 @@ def test_lease_defaults_include_workspace_and_docker_command(tmp_path: Path) -> 
     assert row["workspace_root"] is None
     assert row["workspace_id"] is None
     assert row["docker_command"] is None
+
+
+def test_db_migrates_lima_name_to_backend_instance_name(tmp_path: Path) -> None:
+    db_path = tmp_path / "leases.db"
+    conn = sqlite3.connect(db_path)
+    conn.execute(
+        """
+        CREATE TABLE leases (
+            instance_id TEXT PRIMARY KEY,
+            backend_name TEXT NOT NULL,
+            profile_name TEXT NOT NULL,
+            workspace_root TEXT,
+            workspace_id TEXT,
+            status TEXT NOT NULL,
+            created_at TEXT NOT NULL,
+            expires_at TEXT NOT NULL,
+            last_used_at TEXT NOT NULL,
+            owner_session TEXT,
+            ssh_port INTEGER,
+            lima_name TEXT NOT NULL
+        )
+        """
+    )
+    conn.execute(
+        """
+        INSERT INTO leases (
+            instance_id, backend_name, profile_name, workspace_root, workspace_id,
+            status, created_at, expires_at, last_used_at, owner_session, ssh_port, lima_name
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        """,
+        (
+            "inst_old",
+            "lima",
+            "workspace",
+            None,
+            None,
+            "running",
+            "2026-01-01T00:00:00Z",
+            "2099-01-01T00:00:00Z",
+            "2026-01-01T00:00:00Z",
+            "local",
+            None,
+            "agent-old",
+        ),
+    )
+    conn.commit()
+    conn.close()
+
+    store = LeaseStore(db_path)
+    row = store.get_lease("inst_old")
+
+    assert row is not None
+    assert row["backend_instance_name"] == "agent-old"

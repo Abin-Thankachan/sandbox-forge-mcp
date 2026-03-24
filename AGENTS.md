@@ -4,10 +4,10 @@ This file helps coding agents and new contributors understand this repository qu
 
 ## What This Repo Is
 
-SandboxForge MCP is a Python MCP server that orchestrates ephemeral Lima VMs for isolated task execution.
+SandboxForge MCP is a Python MCP server that orchestrates ephemeral VMs for isolated task execution.
 
 Key point:
-- The isolation boundary is the Lima VM.
+- The isolation boundary is the VM.
 - Docker/Compose run inside that VM as workload runtime.
 - This is VM-contained container execution, not Docker-only host isolation.
 
@@ -25,7 +25,11 @@ Key point:
 - `src/lima_mcp_server/service.py`
   - Main orchestration layer for tool behavior and lifecycle logic.
 - `src/lima_mcp_server/backend/lima.py`
-  - Lima backend adapter (`limactl` operations and VM actions).
+  - Lima backend adapter (`limactl` operations and VM actions) for macOS/Linux.
+- `src/lima_mcp_server/backend/hyperv.py`
+  - Hyper-V backend adapter (PowerShell + SSH/SCP operations) for Windows.
+- `src/lima_mcp_server/backend/factory.py`
+  - Backend selection (`auto|lima|hyperv`) based on host/config.
 - `src/lima_mcp_server/runtime.py`
   - Docker and compose command builders/execution helpers.
 - `src/lima_mcp_server/workspace_config.py`
@@ -58,9 +62,9 @@ Key point:
 
 ## MCP/Runtime Expectations
 
-- Host prerequisites include Python 3.11+, `uv`, and Lima (`limactl`).
+- Host prerequisites include Python 3.11+, `uv`, and backend-specific virtualization tooling.
 - Host Docker is optional for VM flows.
-- If `limactl` is unavailable, Lima-backed tools return `BACKEND_UNAVAILABLE`.
+- If backend prerequisites are unavailable, VM-backed tools return `BACKEND_UNAVAILABLE`.
 
 ## If You Change Behavior
 

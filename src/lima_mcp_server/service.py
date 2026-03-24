@@ -7,6 +7,7 @@ import os
 import shlex
 import signal
 import subprocess
+import sys
 import tarfile
 import tempfile
 import time
@@ -15,11 +16,11 @@ from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any
 
-from .backend.lima import (
+from .backend import (
     BackendCommandError,
     BackendUnavailableError,
     CommandResult,
-    LimaBackend,
+    Backend,
     VmCreateSpec,
 )
 from .config import ServerConfig
@@ -38,7 +39,7 @@ DEFAULT_SERVICE_READY_POLL_SECONDS = 2
 
 
 class LeaseService:
-    def __init__(self, store: LeaseStore, backend: LimaBackend, config: ServerConfig) -> None:
+    def __init__(self, store: LeaseStore, backend: Backend, config: ServerConfig) -> None:
         self.store = store
         self.backend = backend
         self.config = config
@@ -124,38 +125,49 @@ class LeaseService:
         return validation
 
     def _backend_unavailable(self) -> dict[str, Any]:
+        backend_name = str(self.backend.backend_name or "unknown")
         reason = str(self.backend.unavailable_reason or "").strip()
         reason_lower = reason.lower()
         probable_cause = "backend_unavailable"
         next_steps = [
-            "Verify Lima is installed and available: `limactl --version`.",
+            "Verify virtualization backend prerequisites are installed and available.",
             "Review the backend reason and retry after fixing host prerequisites.",
         ]
         if "unsupported host os" in reason_lower:
             probable_cause = "unsupported_host_os"
             next_steps = [
-                "Run this server on a supported host OS: macOS or Linux.",
-                "If you are on Windows, use a Linux/macOS environment and rerun.",
+                "Run this server on a host OS supported by your configured backend.",
+                "Use SANDBOX_BACKEND=auto to select a supported backend for this host.",
             ]
-        elif "limactl not found" in reason_lower:
-            probable_cause = "limactl_missing"
+        elif backend_name == "lima" and "limactl not found" in reason_lower:
+            probable_cause = "backend_binary_missing"
             next_steps = [
                 "Install Lima and ensure `limactl` is in PATH.",
                 "Verify with: `limactl --version`.",
                 "Restart the server after PATH updates, then retry.",
             ]
-        elif "failed to execute limactl --version" in reason_lower:
-            probable_cause = "limactl_not_executable"
+        elif backend_name == "lima" and "failed to execute limactl --version" in reason_lower:
+            probable_cause = "backend_binary_not_executable"
             next_steps = [
                 "Verify `limactl` runs successfully from this shell: `limactl --version`.",
-                "Check host permissions and Lima installation health, then retry.",
+                "Check host permissions and backend installation health, then retry.",
+            ]
+        elif backend_name == "hyperv":
+            probable_cause = "hyperv_unavailable"
+            next_steps = [
+                "Ensure Hyper-V PowerShell commands are available (`Get-Command New-VM`).",
+                "Ensure HYPERV_BASE_VHDX points to an existing base image.",
+                "Ensure OpenSSH client tools (`ssh`, `scp`) are available in PATH.",
             ]
 
         return error_response(
             "BACKEND_UNAVAILABLE",
-            "Lima backend is unavailable",
+            "Requested virtualization backend is unavailable",
             {
-                "backend": self.backend.backend_name,
+                "backend": {
+                    "name": backend_name,
+                    "reason": reason,
+                },
                 "reason": reason,
                 "probable_cause": probable_cause,
                 "next_steps": next_steps,
@@ -164,8 +176,9 @@ class LeaseService:
 
     def _instance_creation_failure_guidance(self, exc: BackendCommandError) -> dict[str, Any]:
         combined = f"{exc.stderr}\n{exc.stdout}".lower()
+        backend_name = str(self.backend.backend_name or "").lower()
 
-        if "qemu" in combined and "not found" in combined:
+        if backend_name == "lima" and "qemu" in combined and "not found" in combined:
             return {
                 "probable_cause": "host_vm_dependency_missing",
                 "next_steps": [
@@ -173,7 +186,9 @@ class LeaseService:
                     "Confirm host tooling is available, then retry `create_instance`.",
                 ],
             }
-        if "/dev/kvm" in combined or ("kvm" in combined and ("not available" in combined or "permission denied" in combined)):
+        if backend_name == "lima" and (
+            "/dev/kvm" in combined or ("kvm" in combined and ("not available" in combined or "permission denied" in combined))
+        ):
             return {
                 "probable_cause": "kvm_unavailable_or_permission_denied",
                 "next_steps": [
@@ -181,7 +196,7 @@ class LeaseService:
                     "Retry after fixing virtualization permissions/capabilities.",
                 ],
             }
-        if "vm-type" in combined and "vz" in combined and "linux" in combined:
+        if backend_name == "lima" and "vm-type" in combined and "vz" in combined and "linux" in combined:
             return {
                 "probable_cause": "unsupported_vm_type_for_host",
                 "next_steps": [
@@ -189,11 +204,20 @@ class LeaseService:
                     "Retry `create_instance` after updating workspace config.",
                 ],
             }
+        if backend_name == "hyperv" and ("new-vm" in combined or "hyper-v" in combined):
+            return {
+                "probable_cause": "hyperv_prerequisites_missing",
+                "next_steps": [
+                    "Ensure Hyper-V is enabled and PowerShell cmdlets are available.",
+                    "Ensure `HYPERV_BASE_VHDX` exists and is accessible.",
+                    "Retry `create_instance` after fixing host prerequisites.",
+                ],
+            }
         return {
             "probable_cause": "instance_create_failed",
             "next_steps": [
-                "Inspect `details.stderr` for host dependency errors from Lima.",
-                "Verify host prerequisites (`limactl` and virtualization dependencies), then retry.",
+                "Inspect `details.stderr` for backend-specific dependency errors.",
+                "Verify backend prerequisites and virtualization dependencies, then retry.",
             ],
         }
 
@@ -222,7 +246,7 @@ class LeaseService:
         live_entries = self.backend.list_instances()
         live_map: dict[str, dict[str, Any]] = {}
         for row in live_entries:
-            name = str(row.get("name") or row.get("instance") or row.get("lima_name") or "")
+            name = str(row.get("name") or row.get("instance") or row.get("backend_instance_name") or "")
             if name:
                 live_map[name] = row
         return live_map
@@ -253,7 +277,7 @@ class LeaseService:
     ) -> CommandResult:
         vm_command = self._build_vm_command(command=command, cwd=cwd, env=env)
         result = self.backend.shell_command(
-            lima_name=str(lease["lima_name"]),
+            backend_instance_name=str(lease["backend_instance_name"]),
             command=vm_command,
             timeout_seconds=timeout_seconds,
         )
@@ -742,7 +766,7 @@ class LeaseService:
                 },
             )
 
-        instance_id, lima_name = self._new_identifiers()
+        instance_id, backend_instance_name = self._new_identifiers()
         expires_at = now + timedelta(minutes=ttl)
         owner_session = os.getenv("MCP_SESSION_ID", "local")
         lease = {
@@ -755,7 +779,7 @@ class LeaseService:
             "last_used_at": now_iso,
             "owner_session": owner_session,
             "ssh_port": None,
-            "lima_name": lima_name,
+            "backend_instance_name": backend_instance_name,
             "workspace_root": workspace_settings.workspace_root,
             "workspace_id": workspace_settings.workspace_id,
             "runtime_name": None,
@@ -774,12 +798,12 @@ class LeaseService:
                 arch=workspace_settings.vm.arch,
                 vm_type=workspace_settings.vm.vm_type,
             )
-            self.backend.create_instance(lima_name=lima_name, vm_spec=vm_spec)
-            self.backend.start_instance(lima_name=lima_name)
+            self.backend.create_instance(backend_instance_name=backend_instance_name, vm_spec=vm_spec)
+            self.backend.start_instance(backend_instance_name=backend_instance_name)
             ssh_port = None
             live_map = self._get_live_map()
-            if lima_name in live_map:
-                ssh_port = self.backend.extract_ssh_port(live_map[lima_name])
+            if backend_instance_name in live_map:
+                ssh_port = self.backend.extract_ssh_port(live_map[backend_instance_name])
 
             self.store.update_lease(
                 instance_id,
@@ -825,8 +849,8 @@ class LeaseService:
             details = exc.details()
             details["guidance"] = self._instance_creation_failure_guidance(exc)
             return error_response(
-                "LIMA_COMMAND_FAILED",
-                "Lima command failed during instance creation",
+                "BACKEND_COMMAND_FAILED",
+                "Backend command failed during instance creation",
                 details,
             )
 
@@ -852,14 +876,14 @@ class LeaseService:
                 live_map = self._get_live_map()
             except BackendCommandError as exc:
                 backend_error = error_response(
-                    "LIMA_COMMAND_FAILED",
-                    "Unable to reconcile with live Lima state",
+                    "BACKEND_COMMAND_FAILED",
+                    "Unable to reconcile with live backend state",
                     exc.details(),
                 )
 
         instances: list[dict[str, Any]] = []
         for row in filtered:
-            live = live_map.get(str(row["lima_name"]))
+            live = live_map.get(str(row["backend_instance_name"]))
             live_status = None
             if live is not None:
                 live_status = str(live.get("status") or live.get("Status") or "") or None
@@ -884,7 +908,7 @@ class LeaseService:
                     "last_used_at": row["last_used_at"],
                     "owner_session": row["owner_session"],
                     "ssh_port": row["ssh_port"],
-                    "lima_name": row["lima_name"],
+                    "backend_instance_name": row["backend_instance_name"],
                     "runtime_name": row.get("runtime_name"),
                     "runtime_ready": bool(row.get("runtime_ready")),
                     "docker_command": row.get("docker_command"),
@@ -959,8 +983,8 @@ class LeaseService:
             return self._backend_unavailable()
         except BackendCommandError as exc:
             return error_response(
-                "LIMA_COMMAND_FAILED",
-                "Failed to execute command in instance",
+                "BACKEND_COMMAND_FAILED",
+                "Failed to execute command in backend instance",
                 exc.details(),
             )
 
@@ -974,7 +998,7 @@ class LeaseService:
 
         try:
             self.backend.copy_to_instance(
-                lima_name=str(lease["lima_name"]),
+                backend_instance_name=str(lease["backend_instance_name"]),
                 local_path=local_path,
                 remote_path=remote_path,
             )
@@ -989,7 +1013,7 @@ class LeaseService:
             return self._backend_unavailable()
         except BackendCommandError as exc:
             return error_response(
-                "LIMA_COMMAND_FAILED",
+                "BACKEND_COMMAND_FAILED",
                 "Copy to instance failed",
                 exc.details(),
             )
@@ -1004,7 +1028,7 @@ class LeaseService:
 
         try:
             self.backend.copy_from_instance(
-                lima_name=str(lease["lima_name"]),
+                backend_instance_name=str(lease["backend_instance_name"]),
                 remote_path=remote_path,
                 local_path=local_path,
             )
@@ -1019,7 +1043,7 @@ class LeaseService:
             return self._backend_unavailable()
         except BackendCommandError as exc:
             return error_response(
-                "LIMA_COMMAND_FAILED",
+                "BACKEND_COMMAND_FAILED",
                 "Copy from instance failed",
                 exc.details(),
             )
@@ -1036,17 +1060,17 @@ class LeaseService:
                 {"instance_id": instance_id},
             )
 
-        lima_name = str(lease["lima_name"])
+        backend_instance_name = str(lease["backend_instance_name"])
         now_iso = to_iso8601(utc_now())
 
         try:
-            self.backend.stop_instance(lima_name=lima_name, force=force)
-            self.backend.delete_instance(lima_name=lima_name, force=force)
+            self.backend.stop_instance(backend_instance_name=backend_instance_name, force=force)
+            self.backend.delete_instance(backend_instance_name=backend_instance_name, force=force)
         except BackendUnavailableError:
             return self._backend_unavailable()
         except BackendCommandError as exc:
             return error_response(
-                "LIMA_COMMAND_FAILED",
+                "BACKEND_COMMAND_FAILED",
                 "Destroy instance failed",
                 exc.details(),
             )
@@ -1571,7 +1595,7 @@ class LeaseService:
         source = Path(local_path).expanduser().resolve()
         if not source.exists():
             return error_response(
-                "LIMA_COMMAND_FAILED",
+                "BACKEND_COMMAND_FAILED",
                 "Local path does not exist",
                 {"local_path": str(source)},
             )
@@ -1595,7 +1619,7 @@ class LeaseService:
                 tar.add(str(source), arcname=".", filter=filter_member)
 
             remote_archive = f"/tmp/{Path(tmp_name).name}"
-            self.backend.copy_to_instance(str(lease["lima_name"]), tmp_name, remote_archive)
+            self.backend.copy_to_instance(str(lease["backend_instance_name"]), tmp_name, remote_archive)
             extract_cmd = (
                 f"mkdir -p {shlex.quote(remote_path)} && "
                 f"tar -xzf {shlex.quote(remote_archive)} -C {shlex.quote(remote_path)} && "
@@ -1604,7 +1628,7 @@ class LeaseService:
             result = self._exec_in_instance(lease=lease, command=extract_cmd, timeout_seconds=1200)
             if result.exit_code != 0:
                 return error_response(
-                    "LIMA_COMMAND_FAILED",
+                    "BACKEND_COMMAND_FAILED",
                     "Failed to extract workspace archive in instance",
                     self._command_details(extract_cmd, result),
                 )
@@ -1620,7 +1644,7 @@ class LeaseService:
             }
         except BackendCommandError as exc:
             return error_response(
-                "LIMA_COMMAND_FAILED",
+                "BACKEND_COMMAND_FAILED",
                 "Workspace sync failed",
                 exc.details(),
             )
@@ -1636,7 +1660,7 @@ class LeaseService:
         target.parent.mkdir(parents=True, exist_ok=True)
         try:
             self.backend.copy_from_instance(
-                lima_name=str(lease["lima_name"]),
+                backend_instance_name=str(lease["backend_instance_name"]),
                 remote_path=remote_path,
                 local_path=str(target),
             )
@@ -1649,7 +1673,7 @@ class LeaseService:
             }
         except BackendCommandError as exc:
             return error_response(
-                "LIMA_COMMAND_FAILED",
+                "BACKEND_COMMAND_FAILED",
                 "Reverse sync from instance failed",
                 exc.details(),
             )
@@ -1853,7 +1877,7 @@ class LeaseService:
         free_before, probe_before = self._disk_free_gib(lease)
         if free_before is None:
             return error_response(
-                "LIMA_COMMAND_FAILED",
+                "BACKEND_COMMAND_FAILED",
                 "Unable to determine free disk space before docker build",
                 self._command_details("disk probe", probe_before),
             )
@@ -1868,7 +1892,7 @@ class LeaseService:
         free_after, probe_after = self._disk_free_gib(lease)
         if free_after is None:
             return error_response(
-                "LIMA_COMMAND_FAILED",
+                "BACKEND_COMMAND_FAILED",
                 "Unable to determine free disk space after cleanup",
                 self._command_details("disk probe", probe_after),
             )
@@ -2207,17 +2231,44 @@ class LeaseService:
         exit_path = task_dir / f"{task_id}.exit"
 
         vm_command = self._build_vm_command(command=command, cwd=cwd, env=env)
-        lima_args = ["limactl", "shell", str(lease["lima_name"]), "--", "sh", "-lc", vm_command]
-        wrapped = (
-            f"{shlex.join(lima_args)} > {shlex.quote(str(log_path))} 2>&1; "
-            f"code=$?; printf '%s' \"$code\" > {shlex.quote(str(exit_path))}"
-        )
+        try:
+            backend_args = self.backend.build_shell_command_args(
+                backend_instance_name=str(lease["backend_instance_name"]),
+                command=vm_command,
+            )
+        except BackendUnavailableError:
+            return self._backend_unavailable()
+        except BackendCommandError as exc:
+            return error_response(
+                "BACKEND_COMMAND_FAILED",
+                "Failed to prepare background task command",
+                exc.details(),
+            )
+        runner = [
+            sys.executable,
+            "-c",
+            (
+                "import pathlib, subprocess, sys; "
+                "args = sys.argv[1:-1]; "
+                "exit_path = pathlib.Path(sys.argv[-1]); "
+                "result = subprocess.run(args, check=False); "
+                "exit_path.write_text(str(result.returncode), encoding='utf-8')"
+            ),
+            *backend_args,
+            str(exit_path),
+        ]
 
         try:
-            proc = subprocess.Popen(["/bin/sh", "-lc", wrapped], start_new_session=True)
+            with log_path.open("w", encoding="utf-8") as log_file:
+                proc = subprocess.Popen(
+                    runner,
+                    stdout=log_file,
+                    stderr=subprocess.STDOUT,
+                    start_new_session=True,
+                )
         except Exception as exc:
             return error_response(
-                "LIMA_COMMAND_FAILED",
+                "BACKEND_COMMAND_FAILED",
                 "Failed to start background task",
                 {"error": str(exc), "instance_id": instance_id},
             )
@@ -2335,7 +2386,7 @@ class LeaseService:
 
         if not remote_paths:
             return error_response(
-                "LIMA_COMMAND_FAILED",
+                "BACKEND_COMMAND_FAILED",
                 "remote_paths cannot be empty",
                 {"remote_paths": remote_paths},
             )
@@ -2351,10 +2402,10 @@ class LeaseService:
                 target = local_dir / f"{idx}-{name}"
 
             try:
-                self.backend.copy_from_instance(str(lease["lima_name"]), remote, str(target))
+                self.backend.copy_from_instance(str(lease["backend_instance_name"]), remote, str(target))
             except BackendCommandError as exc:
                 return error_response(
-                    "LIMA_COMMAND_FAILED",
+                    "BACKEND_COMMAND_FAILED",
                     "Failed to collect artifact",
                     {
                         "remote_path": remote,
@@ -2403,16 +2454,16 @@ class LeaseService:
 
         for lease in expired:
             instance_id = str(lease["instance_id"])
-            lima_name = str(lease["lima_name"])
+            backend_instance_name = str(lease["backend_instance_name"])
 
             if self.backend.available:
                 try:
-                    self.backend.stop_instance(lima_name=lima_name, force=True)
-                    self.backend.delete_instance(lima_name=lima_name, force=True)
+                    self.backend.stop_instance(backend_instance_name=backend_instance_name, force=True)
+                    self.backend.delete_instance(backend_instance_name=backend_instance_name, force=True)
                 except BackendCommandError as exc:
                     errors.append(
                         error_response(
-                            "LIMA_COMMAND_FAILED",
+                            "BACKEND_COMMAND_FAILED",
                             f"Failed to clean up expired instance '{instance_id}'",
                             exc.details(),
                         )

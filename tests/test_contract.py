@@ -15,10 +15,10 @@ class ContractBackend:
     version = "limactl 1.0.0"
     unavailable_reason = ""
 
-    def create_instance(self, lima_name: str, vm_spec: VmCreateSpec):
+    def create_instance(self, backend_instance_name: str, vm_spec: VmCreateSpec):
         return CommandResult(args=[], exit_code=0, stdout="", stderr="", duration_ms=1)
 
-    def start_instance(self, lima_name: str):
+    def start_instance(self, backend_instance_name: str):
         return CommandResult(args=[], exit_code=0, stdout="", stderr="", duration_ms=1)
 
     def list_instances(self):
@@ -27,24 +27,27 @@ class ContractBackend:
     def extract_ssh_port(self, instance):
         return None
 
-    def shell_command(self, lima_name: str, command: str, timeout_seconds: int):
+    def shell_command(self, backend_instance_name: str, command: str, timeout_seconds: int):
         if "df -Pk /" in command:
             return CommandResult(args=[], exit_code=0, stdout="10485760\n", stderr="", duration_ms=5)
         if " image inspect " in command:
             return CommandResult(args=[], exit_code=1, stdout="", stderr="Error: No such image: missing", duration_ms=4)
         return CommandResult(args=[], exit_code=0, stdout="docker\n", stderr="", duration_ms=9)
 
-    def copy_to_instance(self, lima_name: str, local_path: str, remote_path: str):
+    def copy_to_instance(self, backend_instance_name: str, local_path: str, remote_path: str):
         return CommandResult(args=[], exit_code=0, stdout="", stderr="", duration_ms=1)
 
-    def copy_from_instance(self, lima_name: str, remote_path: str, local_path: str):
+    def copy_from_instance(self, backend_instance_name: str, remote_path: str, local_path: str):
         return CommandResult(args=[], exit_code=0, stdout="", stderr="", duration_ms=1)
 
-    def stop_instance(self, lima_name: str, force: bool = False):
+    def stop_instance(self, backend_instance_name: str, force: bool = False):
         return CommandResult(args=[], exit_code=0, stdout="", stderr="", duration_ms=1)
 
-    def delete_instance(self, lima_name: str, force: bool = False):
+    def delete_instance(self, backend_instance_name: str, force: bool = False):
         return CommandResult(args=[], exit_code=0, stdout="", stderr="", duration_ms=1)
+
+    def build_shell_command_args(self, backend_instance_name: str, command: str) -> list[str]:
+        return ["backend-shell", backend_instance_name, command]
 
 
 def parse_iso(ts: str) -> None:
