@@ -92,16 +92,6 @@ make run
 
 For a full machine setup and troubleshooting flow, see [docs/SETUP.md](docs/SETUP.md).
 
-## Landing Page (GitHub Pages)
-
-A Stitch-generated landing page is included at `docs/index.html` and is deployed via GitHub Actions using [.github/workflows/pages.yml](.github/workflows/pages.yml).
-
-Expected GitHub Pages URL for this repository:
-- `https://abin-thankachan.github.io/sandbox-forge-mcp/`
-
-One-time repository setting:
-- In GitHub repository settings, Pages source should be set to **GitHub Actions**.
-
 ## Docker Deploy
 
 Build and deploy the MCP server in Docker:
