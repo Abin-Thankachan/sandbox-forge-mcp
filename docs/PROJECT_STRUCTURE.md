@@ -1,5 +1,7 @@
 # Project Structure
 
+For an agent-first orientation map, start with [../AGENTS.md](../AGENTS.md).
+
 ```text
 src/lima_mcp_server/
   server.py            # MCP app and tool registration
@@ -25,4 +27,3 @@ tests/
 - Tool contract stability is more important than internal implementation details.
 - Backend-specific logic should stay behind backend adapters.
 - Runtime command builders should stay side-effect free.
-

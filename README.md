@@ -11,13 +11,37 @@ This server provides a predictable local orchestration surface for:
 - Infra helpers (MySQL/Redis/network setup)
 - Docker and docker-compose task execution
 
+## Isolation Model (Important)
+
+SandboxForge is **VM-first isolation**, not Docker-only host isolation.
+
+- Isolation boundary: disposable Lima Linux VM
+- Workload runtime inside that boundary: Docker/Compose
+- Host remains cleaner because Docker engine and app containers run in the VM
+- In short: this project creates **VM-contained container runtimes**, not just host Docker namespaces
+
+## Agent Quick Index
+
+Use this map if you are an agent (or a new contributor) trying to understand the repository quickly.
+
+- Primary orientation: [AGENTS.md](AGENTS.md)
+- Human setup path: [docs/SETUP.md](docs/SETUP.md)
+- Architectural intent: [docs/PROJECT_STRUCTURE.md](docs/PROJECT_STRUCTURE.md)
+- Tool registration and transport wiring: [src/lima_mcp_server/server.py](src/lima_mcp_server/server.py)
+- Core orchestration and lifecycle rules: [src/lima_mcp_server/service.py](src/lima_mcp_server/service.py)
+- Lima backend execution layer: [src/lima_mcp_server/backend/lima.py](src/lima_mcp_server/backend/lima.py)
+- Docker command builders: [src/lima_mcp_server/runtime.py](src/lima_mcp_server/runtime.py)
+- Config schema/defaults/validation: [src/lima_mcp_server/workspace_config.py](src/lima_mcp_server/workspace_config.py)
+- Persistence model (leases/tasks): [src/lima_mcp_server/db.py](src/lima_mcp_server/db.py)
+- Contract coverage: [tests/test_contract.py](tests/test_contract.py)
+
 ## How It Works
 
 1. An MCP client calls a tool exposed by this server (`stdio` or Streamable HTTP).
 2. `LeaseService` validates workspace config and enforces lease/task lifecycle rules.
 3. `LeaseStore` (SQLite) persists instance leases and background task state.
 4. `LimaBackend` executes `limactl` operations (create/start/shell/copy/stop/delete).
-5. Docker/Compose commands run inside the leased Lima VM, with optional MySQL/Redis helper setup.
+5. Docker/Compose commands run inside the leased Lima VM (Docker is runtime, VM is isolation boundary), with optional MySQL/Redis helper setup.
 6. A sweeper loop automatically expires and cleans old leases based on TTL.
 
 ## System Requirements
@@ -117,6 +141,7 @@ Note:
 
 ## Developer Docs
 
+- Agent-focused repo map: [AGENTS.md](AGENTS.md)
 - Setup guide: [docs/SETUP.md](docs/SETUP.md)
 - Contribution guide: [CONTRIBUTING.md](CONTRIBUTING.md)
 - Coding standards and constraints: [docs/CODING_STANDARDS.md](docs/CODING_STANDARDS.md)
