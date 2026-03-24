@@ -2,7 +2,7 @@
 
 All notable changes to this project are documented in this file.
 
-## [Unreleased] - 2026-03-24
+## [0.0.1] - 2026-03-24
 
 ### Added
 - New `lima_validate_image` tool for prebuilt image validation against workspace state.
