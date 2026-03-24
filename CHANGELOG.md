@@ -6,6 +6,10 @@ All notable changes to this project are documented in this file.
 
 ### Added
 - New `lima_validate_image` tool for prebuilt image validation against workspace state.
+- Docker deployment assets:
+  - `Dockerfile`
+  - `docker-compose.yml`
+  - `scripts/docker-deploy.sh`
 - Build caching and staleness configuration:
   - `[build.prebuilt]`
   - `[build.prebuilt.staleness_check]`
@@ -23,6 +27,7 @@ All notable changes to this project are documented in this file.
 ### Changed
 - Improved workspace config validation errors to include allowed keys.
 - `create_instance` / `prepare_workspace` support readiness waits for infra services.
+- HTTP host binding now supports explicit non-loopback opt-in via `MCP_HTTP_ALLOW_NON_LOOPBACK=1` (default remains loopback-only).
 - Rebranded project/tool name to **SandboxForge MCP**:
   - package metadata and primary CLI command now use `sandboxforge-mcp-server`
   - new preferred config files: `.sandboxforge.toml` and `~/.config/sandboxforge-mcp/config.toml`

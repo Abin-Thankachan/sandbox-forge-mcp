@@ -1,0 +1,10 @@
+.git
+.github
+.venv
+.pytest_cache
+.uv-cache
+__pycache__
+*.pyc
+*.pyo
+*.pyd
+state/leases.db

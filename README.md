@@ -27,6 +27,43 @@ make run
 
 For a full machine setup and troubleshooting flow, see [docs/SETUP.md](docs/SETUP.md).
 
+## Docker Deploy
+
+Build and deploy the MCP server in Docker:
+
+```bash
+./scripts/docker-deploy.sh deploy
+```
+
+Or with Make:
+
+```bash
+make docker-up
+```
+
+Useful operations:
+
+```bash
+./scripts/docker-deploy.sh logs
+./scripts/docker-deploy.sh ps
+./scripts/docker-deploy.sh down
+```
+
+This deploy uses:
+- `Dockerfile`
+- `docker-compose.yml`
+- persistent local state mount: `./state:/app/state`
+- HTTP exposure on `localhost:8765`
+
+Security default remains loopback-only. Non-loopback bind is now explicitly gated by:
+- `MCP_HTTP_ALLOW_NON_LOOPBACK=1`
+
+The compose setup enables this for container usage (`MCP_HTTP_HOST=0.0.0.0`), while non-container runs remain loopback-only by default.
+
+Note:
+- Lima lifecycle tools require `limactl` to be available inside the container `PATH`.
+- If `limactl` is not present, the server still starts, but Lima-backed tools return `BACKEND_UNAVAILABLE`.
+
 ## Developer Docs
 
 - Setup guide: [docs/SETUP.md](docs/SETUP.md)
@@ -104,6 +141,7 @@ tag_format = "{image}:{git_short}-{deps_hash}"
 ## Environment Variables
 
 - `MCP_HTTP_HOST` (default `127.0.0.1`)
+- `MCP_HTTP_ALLOW_NON_LOOPBACK` (default `0`; set `1` to allow hosts like `0.0.0.0`)
 - `MCP_HTTP_PORT` (default `8765`)
 - `LEASE_DB_PATH` (default `state/leases.db`)
 - `LIMA_SWEEPER_INTERVAL_SECONDS` (default `60`)

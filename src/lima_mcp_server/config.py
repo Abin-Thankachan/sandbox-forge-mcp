@@ -28,8 +28,10 @@ class ServerConfig:
     @classmethod
     def from_env(cls) -> "ServerConfig":
         host = os.getenv("MCP_HTTP_HOST", "127.0.0.1")
-        if host != "127.0.0.1":
-            # v1 scope only allows loopback exposure.
+        allow_non_loopback = _parse_bool(os.getenv("MCP_HTTP_ALLOW_NON_LOOPBACK", "0"), False)
+        if host != "127.0.0.1" and not allow_non_loopback:
+            # Default behavior is loopback-only for safety.
+            # Explicit non-loopback binds (for example Docker) require MCP_HTTP_ALLOW_NON_LOOPBACK=1.
             host = "127.0.0.1"
 
         return cls(

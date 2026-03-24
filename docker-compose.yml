@@ -1,0 +1,19 @@
+services:
+  sandboxforge-mcp:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    image: sandboxforge-mcp:latest
+    container_name: sandboxforge-mcp
+    restart: unless-stopped
+    environment:
+      MCP_ENABLE_HTTP: "1"
+      MCP_HTTP_HOST: "0.0.0.0"
+      MCP_HTTP_ALLOW_NON_LOOPBACK: "1"
+      MCP_HTTP_PORT: "8765"
+      LEASE_DB_PATH: "/app/state/leases.db"
+      LIMA_SWEEPER_INTERVAL_SECONDS: "60"
+    ports:
+      - "8765:8765"
+    volumes:
+      - ./state:/app/state
