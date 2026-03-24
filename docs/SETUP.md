@@ -37,7 +37,7 @@ Important:
 ```bash
 git clone <your-fork-or-repo-url>
 cd SandboxMCP
-uv sync --dev
+uv sync --extra dev
 ```
 
 ## 3. Run Tests
@@ -46,7 +46,7 @@ uv sync --dev
 uv run pytest -q
 ```
 
-If a dependency is missing in your environment, install it via `uv sync --dev` and rerun.
+If a dependency is missing in your environment, install it via `uv sync --extra dev` and rerun.
 
 ## 4. Run the Server
 

@@ -1,7 +1,7 @@
 .PHONY: setup test run docker-up docker-down docker-logs docker-ps
 
 setup:
-	uv sync --dev
+	uv sync --extra dev
 
 test:
 	uv run pytest -q

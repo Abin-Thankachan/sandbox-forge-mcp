@@ -55,7 +55,7 @@ Unsupported hosts fail backend preflight with `BACKEND_UNAVAILABLE`.
 ## Quick Start
 
 ```bash
-uv sync --dev
+uv sync --extra dev
 uv run sandboxforge-mcp-server
 ```
 
