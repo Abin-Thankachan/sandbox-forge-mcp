@@ -15,6 +15,23 @@ On macOS (Homebrew):
 brew install uv lima
 ```
 
+On Linux (example package sources vary by distro):
+
+```bash
+# install uv (https://docs.astral.sh/uv/getting-started/installation/)
+# install Lima and ensure limactl is in PATH
+limactl --version
+```
+
+Host defaults:
+- macOS uses `vm.vm_type = "vz"` by default.
+- Linux uses `vm.vm_type = "qemu"` by default.
+
+Important:
+- Host VM tooling is not auto-installed by this project.
+- On Linux, install distro-specific Lima prerequisites yourself (including any required QEMU/KVM components).
+- This project can auto-install Docker inside the created VM during workspace bootstrap, but it does not provision host virtualization dependencies.
+
 ## 2. Clone and Install
 
 ```bash

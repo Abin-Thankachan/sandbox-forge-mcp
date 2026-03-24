@@ -3,6 +3,7 @@ from __future__ import annotations
 import json
 import shutil
 import subprocess
+import sys
 import time
 from dataclasses import dataclass
 from typing import Any
@@ -68,6 +69,12 @@ class LimaBackend:
         self._preflight()
 
     def _preflight(self) -> None:
+        host_os = sys.platform.lower()
+        if not (host_os.startswith("darwin") or host_os.startswith("linux")):
+            self.available = False
+            self.unavailable_reason = f"unsupported host OS '{host_os}'; only macOS and Linux are supported"
+            return
+
         binary = shutil.which("limactl")
         if not binary:
             self.available = False

@@ -2,6 +2,22 @@
 
 All notable changes to this project are documented in this file.
 
+## [Unreleased]
+
+## [0.0.2] - 2026-03-24
+
+### Added
+- Cross-platform CI workflow covering `ubuntu-latest` and `macos-latest` with Python 3.11 test runs.
+
+### Changed
+- Added Linux host support as a supported runtime target.
+- Workspace default `vm.vm_type` is now host-aware:
+  - macOS: `vz`
+  - Linux: `qemu`
+  - other hosts: `null`
+- Lima backend preflight now fails fast on unsupported host OS with a clear unavailable reason.
+- Backend and instance creation failures now include guided `probable_cause` and `next_steps` details for missing host dependencies.
+
 ## [0.0.1] - 2026-03-24
 
 ### Added

@@ -124,14 +124,78 @@ class LeaseService:
         return validation
 
     def _backend_unavailable(self) -> dict[str, Any]:
+        reason = str(self.backend.unavailable_reason or "").strip()
+        reason_lower = reason.lower()
+        probable_cause = "backend_unavailable"
+        next_steps = [
+            "Verify Lima is installed and available: `limactl --version`.",
+            "Review the backend reason and retry after fixing host prerequisites.",
+        ]
+        if "unsupported host os" in reason_lower:
+            probable_cause = "unsupported_host_os"
+            next_steps = [
+                "Run this server on a supported host OS: macOS or Linux.",
+                "If you are on Windows, use a Linux/macOS environment and rerun.",
+            ]
+        elif "limactl not found" in reason_lower:
+            probable_cause = "limactl_missing"
+            next_steps = [
+                "Install Lima and ensure `limactl` is in PATH.",
+                "Verify with: `limactl --version`.",
+                "Restart the server after PATH updates, then retry.",
+            ]
+        elif "failed to execute limactl --version" in reason_lower:
+            probable_cause = "limactl_not_executable"
+            next_steps = [
+                "Verify `limactl` runs successfully from this shell: `limactl --version`.",
+                "Check host permissions and Lima installation health, then retry.",
+            ]
+
         return error_response(
             "BACKEND_UNAVAILABLE",
             "Lima backend is unavailable",
             {
                 "backend": self.backend.backend_name,
-                "reason": self.backend.unavailable_reason,
+                "reason": reason,
+                "probable_cause": probable_cause,
+                "next_steps": next_steps,
             },
         )
+
+    def _instance_creation_failure_guidance(self, exc: BackendCommandError) -> dict[str, Any]:
+        combined = f"{exc.stderr}\n{exc.stdout}".lower()
+
+        if "qemu" in combined and "not found" in combined:
+            return {
+                "probable_cause": "host_vm_dependency_missing",
+                "next_steps": [
+                    "Install Linux host virtualization dependencies required by Lima (including QEMU tooling).",
+                    "Confirm host tooling is available, then retry `create_instance`.",
+                ],
+            }
+        if "/dev/kvm" in combined or ("kvm" in combined and ("not available" in combined or "permission denied" in combined)):
+            return {
+                "probable_cause": "kvm_unavailable_or_permission_denied",
+                "next_steps": [
+                    "Ensure KVM is available and your user has permission to access `/dev/kvm`.",
+                    "Retry after fixing virtualization permissions/capabilities.",
+                ],
+            }
+        if "vm-type" in combined and "vz" in combined and "linux" in combined:
+            return {
+                "probable_cause": "unsupported_vm_type_for_host",
+                "next_steps": [
+                    "Set `vm.vm_type = \"qemu\"` for Linux hosts (or remove override to use host default).",
+                    "Retry `create_instance` after updating workspace config.",
+                ],
+            }
+        return {
+            "probable_cause": "instance_create_failed",
+            "next_steps": [
+                "Inspect `details.stderr` for host dependency errors from Lima.",
+                "Verify host prerequisites (`limactl` and virtualization dependencies), then retry.",
+            ],
+        }
 
     def _invalid_ttl(self, ttl_minutes: int | None) -> dict[str, Any]:
         return error_response(
@@ -758,10 +822,12 @@ class LeaseService:
             return self._backend_unavailable()
         except BackendCommandError as exc:
             self.store.update_lease(instance_id, status="error", last_used_at=to_iso8601(utc_now()))
+            details = exc.details()
+            details["guidance"] = self._instance_creation_failure_guidance(exc)
             return error_response(
                 "LIMA_COMMAND_FAILED",
                 "Lima command failed during instance creation",
-                exc.details(),
+                details,
             )
 
     def list_instances(self, include_expired: bool = False) -> dict[str, Any]:

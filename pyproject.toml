@@ -1,6 +1,6 @@
 [project]
 name = "sandboxforge-mcp"
-version = "0.0.1"
+version = "0.0.2"
 description = "SandboxForge MCP server backed by Lima"
 readme = "README.md"
 requires-python = ">=3.11"

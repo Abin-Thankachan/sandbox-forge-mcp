@@ -23,7 +23,7 @@ This server provides a predictable local orchestration surface for:
 ## System Requirements
 
 Current baseline requirements:
-- macOS host (only supported OS currently)
+- macOS or Linux host
 - Python `3.11+`
 - [uv](https://github.com/astral-sh/uv)
 - Lima installed and `limactl` available in `PATH`
@@ -36,18 +36,21 @@ Optional for containerized deployment:
 - Docker Engine / Docker Desktop
 - `docker compose` (or `docker-compose`)
 
+Important:
+- Host VM tooling is not auto-installed by SandboxForge MCP.
+- On Linux hosts, ensure Lima prerequisites for your distro are installed (for example QEMU/KVM support as required by your Lima setup).
+
 ## OS Support Status
 
 Status as of **2026-03-24**:
 
 | OS | Status | Notes |
 |---|---|---|
-| macOS | Supported | Only supported platform at this time. |
-| Linux | Not supported | Not working as a supported target yet. |
+| macOS | Supported | Default `vm.vm_type` is `vz`. |
+| Linux | Supported | Default `vm.vm_type` is `qemu`. |
 | Windows (native) | Not supported | Not working as a supported target yet. |
 | Windows via WSL2/VM | Not supported | Not working as a supported target yet. |
-
-More OS support is planned and will be added in future releases.
+Unsupported hosts fail backend preflight with `BACKEND_UNAVAILABLE`.
 
 ## Quick Start
 
@@ -126,6 +129,7 @@ Default VM shape:
 - `cpus = 1`
 - `memory_gib = 2.0`
 - `disk_gib = 15.0`
+- `vm_type = "vz"` on macOS, `vm_type = "qemu"` on Linux, `vm_type = null` on other hosts
 - `template = "template:docker"`
 
 Infra defaults:

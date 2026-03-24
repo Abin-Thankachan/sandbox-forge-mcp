@@ -84,3 +84,21 @@ def test_backend_unavailable_when_limactl_missing(monkeypatch: pytest.MonkeyPatc
 
     assert backend.available is False
     assert "limactl not found" in backend.unavailable_reason
+
+
+def test_backend_unavailable_on_unsupported_host_without_limactl_probe(monkeypatch: pytest.MonkeyPatch) -> None:
+    calls: list[list[str]] = []
+
+    def fake_run(args, capture_output, text, timeout, check):  # noqa: ANN001
+        calls.append(list(args))
+        return subprocess.CompletedProcess(args=args, returncode=0, stdout="", stderr="")
+
+    monkeypatch.setattr("lima_mcp_server.backend.lima.sys.platform", "win32")
+    monkeypatch.setattr(shutil, "which", lambda _: "/usr/local/bin/limactl")
+    monkeypatch.setattr(subprocess, "run", fake_run)
+
+    backend = LimaBackend()
+
+    assert backend.available is False
+    assert "unsupported host os" in backend.unavailable_reason.lower()
+    assert calls == []

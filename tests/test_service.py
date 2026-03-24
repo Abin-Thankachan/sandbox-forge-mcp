@@ -3,7 +3,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from pathlib import Path
 
-from lima_mcp_server.backend.lima import CommandResult, VmCreateSpec
+from lima_mcp_server.backend.lima import BackendCommandError, CommandResult, VmCreateSpec
 from lima_mcp_server.config import ServerConfig
 from lima_mcp_server.db import LeaseStore
 from lima_mcp_server.service import LeaseService
@@ -136,10 +136,49 @@ def test_destroy_orders_stop_then_delete(tmp_path: Path) -> None:
 
 
 def test_backend_unavailable_returns_structured_error(tmp_path: Path) -> None:
-    backend = FakeBackend(available=False, unavailable_reason="limactl missing")
+    backend = FakeBackend(available=False, unavailable_reason="limactl not found in PATH")
     service = make_service(tmp_path, backend)
 
     result = service.create_instance(workspace_root=str(tmp_path), ttl_minutes=30, auto_bootstrap=False)
 
     assert result["error_code"] == "BACKEND_UNAVAILABLE"
     assert "details" in result
+    assert result["details"]["probable_cause"] == "limactl_missing"
+    assert result["details"]["next_steps"]
+
+
+def test_backend_unavailable_on_unsupported_host_returns_guidance(tmp_path: Path) -> None:
+    backend = FakeBackend(
+        available=False,
+        unavailable_reason="unsupported host OS 'win32'; only macOS and Linux are supported",
+    )
+    service = make_service(tmp_path, backend)
+
+    result = service.create_instance(workspace_root=str(tmp_path), ttl_minutes=30, auto_bootstrap=False)
+
+    assert result["error_code"] == "BACKEND_UNAVAILABLE"
+    assert result["details"]["probable_cause"] == "unsupported_host_os"
+    assert any("macOS or Linux" in step for step in result["details"]["next_steps"])
+
+
+def test_create_instance_dependency_failure_returns_guided_message(tmp_path: Path) -> None:
+    backend = FakeBackend()
+
+    def fail_create(lima_name: str, vm_spec: VmCreateSpec) -> CommandResult:  # noqa: ARG001
+        raise BackendCommandError(
+            command=["limactl", "create", "--name", lima_name],
+            exit_code=1,
+            stdout="",
+            stderr="qemu-system-x86_64: command not found",
+            duration_ms=10,
+        )
+
+    backend.create_instance = fail_create  # type: ignore[method-assign]
+    service = make_service(tmp_path, backend)
+
+    result = service.create_instance(workspace_root=str(tmp_path), ttl_minutes=30, auto_bootstrap=False)
+
+    assert result["error_code"] == "LIMA_COMMAND_FAILED"
+    guidance = result["details"]["guidance"]
+    assert guidance["probable_cause"] == "host_vm_dependency_missing"
+    assert any("QEMU" in step for step in guidance["next_steps"])

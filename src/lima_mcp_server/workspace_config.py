@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import hashlib
+import sys
 from dataclasses import asdict, dataclass
 from pathlib import Path
 from typing import Any
@@ -11,84 +12,94 @@ except ModuleNotFoundError:  # pragma: no cover - py<3.11 fallback
     import tomli as tomllib  # type: ignore[no-redef]
 
 
-DEFAULT_CONFIG: dict[str, Any] = {
-    "vm": {
-        "cpus": 1,
-        "memory_gib": 2.0,
-        "disk_gib": 15.0,
-        "arch": None,
-        "vm_type": "vz",
-        "template": "template:docker",
-    },
-    "docker": {
-        "install_if_missing": True,
-    },
-    "build": {
-        "enable_buildkit": True,
-        "min_free_gib": 3.0,
-        "prebuilt": {
-            "enabled": True,
-            "validation": "strict",
-            "staleness_check": {
+def _default_vm_type_for_host(platform_name: str | None = None) -> str | None:
+    normalized = (platform_name or sys.platform).lower()
+    if normalized.startswith("darwin"):
+        return "vz"
+    if normalized.startswith("linux"):
+        return "qemu"
+    return None
+
+
+def _default_config() -> dict[str, Any]:
+    return {
+        "vm": {
+            "cpus": 1,
+            "memory_gib": 2.0,
+            "disk_gib": 15.0,
+            "arch": None,
+            "vm_type": _default_vm_type_for_host(),
+            "template": "template:docker",
+        },
+        "docker": {
+            "install_if_missing": True,
+        },
+        "build": {
+            "enable_buildkit": True,
+            "min_free_gib": 3.0,
+            "prebuilt": {
+                "enabled": True,
+                "validation": "strict",
+                "staleness_check": {
+                    "check_git_commit": True,
+                    "check_dependencies": True,
+                    "check_age_threshold": "24h",
+                    "on_stale": "rebuild",
+                },
+            },
+            "image_caching": {
+                "enabled": True,
+                "strategy": "smart",
+                "tag_format": "{image}:{git_short}-{deps_hash}",
+            },
+            "staleness_detection": {
                 "check_git_commit": True,
-                "check_dependencies": True,
-                "check_age_threshold": "24h",
+                "check_git_dirty": True,
+                "check_dependencies": ["pyproject.toml", "uv.lock"],
+                "check_dockerfile": True,
+                "max_age_threshold": "24h",
                 "on_stale": "rebuild",
+                "on_dirty_workspace": "warn_and_rebuild",
+                "on_missing": "build",
             },
         },
-        "image_caching": {
-            "enabled": True,
-            "strategy": "smart",
-            "tag_format": "{image}:{git_short}-{deps_hash}",
+        "infra": {
+            "ensure_network": True,
+            "bridge_to_compose_network": True,
+            "include_services_by_default": True,
+            "network_name": None,
+            "network_name_prefix": "lima-net",
+            "mysql": {
+                "enabled": True,
+                "image": "mysql:8.0",
+                "root_password": "root",
+                "database": "app",
+                "container_name_prefix": "lima-mysql",
+                "extra_env": {},
+                "inject_env_to": ".env",
+            },
+            "redis": {
+                "enabled": True,
+                "image": "redis:7-alpine",
+                "container_name_prefix": "lima-redis",
+                "extra_env": {},
+                "inject_env_to": ".env",
+            },
         },
-        "staleness_detection": {
-            "check_git_commit": True,
-            "check_git_dirty": True,
-            "check_dependencies": ["pyproject.toml", "uv.lock"],
-            "check_dockerfile": True,
-            "max_age_threshold": "24h",
-            "on_stale": "rebuild",
-            "on_dirty_workspace": "warn_and_rebuild",
-            "on_missing": "build",
+        "sync": {
+            "include_git": False,
+            "exclude_patterns": [
+                ".venv",
+                ".venv/**",
+                ".pytest_cache",
+                ".pytest_cache/**",
+                ".uv-cache",
+                ".uv-cache/**",
+                "__pycache__",
+                "__pycache__/**",
+            ],
         },
-    },
-    "infra": {
-        "ensure_network": True,
-        "bridge_to_compose_network": True,
-        "include_services_by_default": True,
-        "network_name": None,
-        "network_name_prefix": "lima-net",
-        "mysql": {
-            "enabled": True,
-            "image": "mysql:8.0",
-            "root_password": "root",
-            "database": "app",
-            "container_name_prefix": "lima-mysql",
-            "extra_env": {},
-            "inject_env_to": ".env",
-        },
-        "redis": {
-            "enabled": True,
-            "image": "redis:7-alpine",
-            "container_name_prefix": "lima-redis",
-            "extra_env": {},
-            "inject_env_to": ".env",
-        },
-    },
-    "sync": {
-        "include_git": False,
-        "exclude_patterns": [
-            ".venv",
-            ".venv/**",
-            ".pytest_cache",
-            ".pytest_cache/**",
-            ".uv-cache",
-            ".uv-cache/**",
-            "__pycache__",
-            "__pycache__/**",
-        ],
-    },
-}
+    }
 
 
 class WorkspaceConfigError(ValueError):
@@ -569,7 +580,7 @@ def resolve_workspace_settings(
         ]
     workspace_paths = [root / ".lima-mcp.toml", root / ".orbitforge.toml", root / ".sandboxforge.toml"]
 
-    merged = _deep_copy(DEFAULT_CONFIG)
+    merged = _deep_copy(_default_config())
     sources = ["defaults"]
 
     for global_path in global_paths:

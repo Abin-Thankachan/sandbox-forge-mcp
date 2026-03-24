@@ -205,3 +205,51 @@ def test_workspace_config_supports_new_global_path_and_takes_precedence(tmp_path
     workspace.mkdir(parents=True, exist_ok=True)
     settings = resolve_workspace_settings(workspace_root=str(workspace))
     assert settings.vm.cpus == 3
+
+
+def test_workspace_config_default_vm_type_is_vz_on_macos(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    workspace = tmp_path / "ws"
+    workspace.mkdir(parents=True, exist_ok=True)
+    monkeypatch.setattr("lima_mcp_server.workspace_config.sys.platform", "darwin")
+
+    settings = resolve_workspace_settings(workspace_root=str(workspace))
+
+    assert settings.vm.vm_type == "vz"
+
+
+def test_workspace_config_default_vm_type_is_qemu_on_linux(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    workspace = tmp_path / "ws"
+    workspace.mkdir(parents=True, exist_ok=True)
+    monkeypatch.setattr("lima_mcp_server.workspace_config.sys.platform", "linux")
+
+    settings = resolve_workspace_settings(workspace_root=str(workspace))
+
+    assert settings.vm.vm_type == "qemu"
+
+
+def test_workspace_config_default_vm_type_is_none_on_unsupported_host(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    workspace = tmp_path / "ws"
+    workspace.mkdir(parents=True, exist_ok=True)
+    monkeypatch.setattr("lima_mcp_server.workspace_config.sys.platform", "win32")
+
+    settings = resolve_workspace_settings(workspace_root=str(workspace))
+
+    assert settings.vm.vm_type is None
+
+
+def test_workspace_config_explicit_vm_type_override_is_preserved(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    workspace = tmp_path / "ws"
+    workspace.mkdir(parents=True, exist_ok=True)
+    monkeypatch.setattr("lima_mcp_server.workspace_config.sys.platform", "linux")
+    (workspace / ".lima-mcp.toml").write_text(
+        "\n".join(
+            [
+                "[vm]",
+                "vm_type = \"vz\"",
+            ]
+        )
+    )
+
+    settings = resolve_workspace_settings(workspace_root=str(workspace))
+
+    assert settings.vm.vm_type == "vz"
