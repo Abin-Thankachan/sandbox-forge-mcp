@@ -11,6 +11,44 @@ This server provides a predictable local orchestration surface for:
 - Infra helpers (MySQL/Redis/network setup)
 - Docker and docker-compose task execution
 
+## How It Works
+
+1. An MCP client calls a tool exposed by this server (`stdio` or Streamable HTTP).
+2. `LeaseService` validates workspace config and enforces lease/task lifecycle rules.
+3. `LeaseStore` (SQLite) persists instance leases and background task state.
+4. `LimaBackend` executes `limactl` operations (create/start/shell/copy/stop/delete).
+5. Docker/Compose commands run inside the leased Lima VM, with optional MySQL/Redis helper setup.
+6. A sweeper loop automatically expires and cleans old leases based on TTL.
+
+## System Requirements
+
+Current baseline requirements:
+- macOS host (only supported OS currently)
+- Python `3.11+`
+- [uv](https://github.com/astral-sh/uv)
+- Lima installed and `limactl` available in `PATH`
+- Ability to allocate at least the default VM shape:
+  - `1` CPU
+  - `2 GiB` RAM
+  - `15 GiB` disk
+
+Optional for containerized deployment:
+- Docker Engine / Docker Desktop
+- `docker compose` (or `docker-compose`)
+
+## OS Support Status
+
+Status as of **2026-03-24**:
+
+| OS | Status | Notes |
+|---|---|---|
+| macOS | Supported | Only supported platform at this time. |
+| Linux | Not supported | Not working as a supported target yet. |
+| Windows (native) | Not supported | Not working as a supported target yet. |
+| Windows via WSL2/VM | Not supported | Not working as a supported target yet. |
+
+More OS support is planned and will be added in future releases.
+
 ## Quick Start
 
 ```bash
