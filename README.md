@@ -1,231 +1,235 @@
 # SandboxForge MCP
 
-Python MCP server (FastMCP) with dual transports (`stdio` + Streamable HTTP on localhost) and workspace-scoped virtualization lifecycle tools.
+SandboxForge MCP is a Python MCP server for **VM-first isolated execution** with workspace-aware tooling.
 
-## Why This Project
+It supports multiple virtualization backends:
+- **Lima** on macOS and Linux
+- **Hyper-V** on native Windows
 
-This server provides a predictable local orchestration surface for:
-- Ephemeral VM instances (Lima on macOS/Linux, Hyper-V on Windows)
-- Workspace sync in/out
-- Docker runtime bootstrap inside the VM
-- Infra helpers (MySQL/Redis/network setup)
-- Docker and docker-compose task execution
+Inside each VM, it can prepare and run Docker/Compose workloads, manage supporting services (MySQL/Redis), and orchestrate task execution with lease-based lifecycle controls.
 
-## Isolation Model (Important)
+## Table of Contents
+- [What It Provides](#what-it-provides)
+- [Isolation Model](#isolation-model)
+- [OS Support](#os-support)
+- [Architecture](#architecture)
+- [Requirements](#requirements)
+- [Quick Start](#quick-start)
+- [Tool Surface](#tool-surface)
+- [Configuration](#configuration)
+- [Environment Variables](#environment-variables)
+- [Windows Notes](#windows-notes)
+- [Docker Deployment](#docker-deployment)
+- [Development](#development)
+- [Migration Notes (v1 Breaking)](#migration-notes-v1-breaking)
+- [Troubleshooting](#troubleshooting)
+- [Related Docs](#related-docs)
+- [License](#license)
 
-SandboxForge is **VM-first isolation**, not Docker-only host isolation.
+## What It Provides
+- Ephemeral VM lifecycle orchestration (`create/list/run/copy/destroy`)
+- Workspace bootstrap and sync in/out
+- Docker runtime preparation inside guest VM
+- Docker / docker-compose execution helpers
+- Optional infra setup (network, MySQL, Redis)
+- Background task management and artifact collection
+- Lease persistence and TTL-based cleanup via SQLite
+- Image validation and cache-aware build flow
+
+## Isolation Model
+SandboxForge is **VM-first isolation**, not Docker-on-host isolation.
 
 - Isolation boundary: disposable VM guest
-- Workload runtime inside that boundary: Docker/Compose
-- Host remains cleaner because Docker engine and app containers run in the VM
-- In short: this project creates **VM-contained container runtimes**, not just host Docker namespaces
+- Runtime inside boundary: Docker/Compose
+- Result: stronger host separation and reduced host pollution
 
-## Agent Quick Index
+## OS Support
+Status as of **March 25, 2026**:
 
-Use this map if you are an agent (or a new contributor) trying to understand the repository quickly.
+| Host OS | Status | Backend | Notes |
+|---|---|---|---|
+| macOS | Supported | Lima | Default `vm.vm_type = "vz"` |
+| Linux | Supported | Lima | Default `vm.vm_type = "qemu"` |
+| Windows (native) | Supported | Hyper-V | Requires Hyper-V + `HYPERV_BASE_VHDX` + OpenSSH client |
+| Windows (WSL2-hosted server runtime) | Not supported in v1 | N/A | v1 target is native Windows server runtime |
 
-- Primary orientation: [AGENTS.md](AGENTS.md)
-- Human setup path: [docs/SETUP.md](docs/SETUP.md)
-- Architectural intent: [docs/PROJECT_STRUCTURE.md](docs/PROJECT_STRUCTURE.md)
-- Tool registration and transport wiring: [src/lima_mcp_server/server.py](src/lima_mcp_server/server.py)
-- Core orchestration and lifecycle rules: [src/lima_mcp_server/service.py](src/lima_mcp_server/service.py)
-- Backend execution layers:
-  - [src/lima_mcp_server/backend/lima.py](src/lima_mcp_server/backend/lima.py)
-  - [src/lima_mcp_server/backend/hyperv.py](src/lima_mcp_server/backend/hyperv.py)
-- Docker command builders: [src/lima_mcp_server/runtime.py](src/lima_mcp_server/runtime.py)
-- Config schema/defaults/validation: [src/lima_mcp_server/workspace_config.py](src/lima_mcp_server/workspace_config.py)
-- Persistence model (leases/tasks): [src/lima_mcp_server/db.py](src/lima_mcp_server/db.py)
-- Contract coverage: [tests/test_contract.py](tests/test_contract.py)
+Unsupported hosts or missing backend prerequisites return `BACKEND_UNAVAILABLE`.
 
-## How It Works
+## Architecture
+High-level flow:
+1. MCP client invokes server tool (`stdio` or Streamable HTTP)
+2. `LeaseService` validates request/config and applies lifecycle rules
+3. `LeaseStore` persists leases/tasks in SQLite
+4. Selected backend executes VM operations
+5. Docker/Compose operations run inside guest VM
+6. Sweeper expires stale leases by TTL
 
-1. An MCP client calls a tool exposed by this server (`stdio` or Streamable HTTP).
-2. `LeaseService` validates workspace config and enforces lease/task lifecycle rules.
-3. `LeaseStore` (SQLite) persists instance leases and background task state.
-4. The selected backend executes VM operations (create/start/shell/copy/stop/delete).
-5. Docker/Compose commands run inside the leased VM (Docker is runtime, VM is isolation boundary), with optional MySQL/Redis helper setup.
-6. A sweeper loop automatically expires and cleans old leases based on TTL.
+Key modules:
+- `src/lima_mcp_server/server.py`: MCP app + tool registration
+- `src/lima_mcp_server/service.py`: orchestration and response shaping
+- `src/lima_mcp_server/backend/lima.py`: Lima backend
+- `src/lima_mcp_server/backend/hyperv.py`: Hyper-V backend
+- `src/lima_mcp_server/backend/factory.py`: backend selection (`auto|lima|hyperv`)
+- `src/lima_mcp_server/workspace_config.py`: workspace/global config parsing and validation
+- `src/lima_mcp_server/runtime.py`: Docker/Compose command builders
+- `src/lima_mcp_server/db.py`: SQLite lease/task persistence
 
-## System Requirements
-
-Current baseline requirements:
-- macOS, Linux, or Windows host
+## Requirements
 - Python `3.11+`
-- [uv](https://github.com/astral-sh/uv)
-- Virtualization backend prerequisites for your host:
-  - macOS/Linux: Lima (`limactl`)
-  - Windows: Hyper-V PowerShell cmdlets + OpenSSH client
-- Ability to allocate at least the default VM shape:
-  - `1` CPU
-  - `2 GiB` RAM
-  - `15 GiB` disk
+- [`uv`](https://github.com/astral-sh/uv)
+- Host virtualization prerequisites:
+  - macOS/Linux: `limactl` available in `PATH`
+  - Windows: Hyper-V PowerShell cmdlets + `ssh`/`scp`
 
-Optional for containerized deployment:
-- Docker Engine / Docker Desktop
-- `docker compose` (or `docker-compose`)
-
-Important:
-- Host VM tooling is not auto-installed by SandboxForge MCP.
-- On Linux hosts, ensure Lima prerequisites for your distro are installed (for example QEMU/KVM support).
-- On Windows hosts, configure Hyper-V and set `HYPERV_BASE_VHDX`.
-
-## OS Support Status
-
-Status as of **2026-03-24**:
-
-| OS | Status | Notes |
-|---|---|---|
-| macOS | Supported | Uses Lima backend by default (`vm.vm_type = "vz"`). |
-| Linux | Supported | Uses Lima backend by default (`vm.vm_type = "qemu"`). |
-| Windows (native) | Supported (Hyper-V) | Run server natively on Windows; requires Hyper-V + `HYPERV_BASE_VHDX` + OpenSSH client tools. |
-| Windows via WSL2/VM runtime | Not supported (v1) | v1 target is native Windows runtime; WSL2-hosted server runtime is out of scope. |
-Unsupported hosts fail backend preflight with `BACKEND_UNAVAILABLE`.
+Minimum default VM shape:
+- `cpus = 1`
+- `memory_gib = 2.0`
+- `disk_gib = 15.0`
 
 ## Quick Start
-
 ```bash
 uv sync --extra dev
 uv run sandboxforge-mcp-server
 ```
 
-Or use:
-
+Using Make:
 ```bash
 make setup
 make run
 ```
 
-For a full machine setup and troubleshooting flow, see [docs/SETUP.md](docs/SETUP.md).
+## Tool Surface
+Registered MCP tools include:
+- `create_instance`
+- `validate_workspace_config`
+- `validate_image`
+- `list_instances`
+- `run_command`
+- `copy_to_instance`
+- `copy_from_instance`
+- `destroy_instance`
+- `prepare_workspace`
+- `sync_workspace_to_instance`
+- `sync_instance_to_workspace`
+- `docker_build`
+- `docker_run`
+- `docker_exec`
+- `docker_logs`
+- `docker_compose`
+- `docker_ps`
+- `docker_images`
+- `docker_cleanup`
+- `start_background_task`
+- `get_task_status`
+- `get_task_logs`
+- `stop_task`
+- `collect_artifacts`
+- `extend_instance_ttl`
 
-## Docker Deploy
-
-Build and deploy the MCP server in Docker:
-
-```bash
-./scripts/docker-deploy.sh deploy
-```
-
-Or with Make:
-
-```bash
-make docker-up
-```
-
-Useful operations:
-
-```bash
-./scripts/docker-deploy.sh logs
-./scripts/docker-deploy.sh ps
-./scripts/docker-deploy.sh down
-```
-
-This deploy uses:
-- `Dockerfile`
-- `docker-compose.yml`
-- persistent local state mount: `./state:/app/state`
-- HTTP exposure on `localhost:8765`
-
-Security default remains loopback-only. Non-loopback bind is now explicitly gated by:
-- `MCP_HTTP_ALLOW_NON_LOOPBACK=1`
-
-The compose setup enables this for container usage (`MCP_HTTP_HOST=0.0.0.0`), while non-container runs remain loopback-only by default.
-
-Note:
-- Backend lifecycle tools require host-specific virtualization dependencies to be available.
-- If backend prerequisites are missing, the server still starts, but VM-backed tools return `BACKEND_UNAVAILABLE`.
-
-## Developer Docs
-
-- Agent-focused repo map: [AGENTS.md](AGENTS.md)
-- Setup guide: [docs/SETUP.md](docs/SETUP.md)
-- Contribution guide: [CONTRIBUTING.md](CONTRIBUTING.md)
-- Coding standards and constraints: [docs/CODING_STANDARDS.md](docs/CODING_STANDARDS.md)
-- Project layout: [docs/PROJECT_STRUCTURE.md](docs/PROJECT_STRUCTURE.md)
-- Changelog: [CHANGELOG.md](CHANGELOG.md)
-- Security policy: [SECURITY.md](SECURITY.md)
-
-## Workspace Config
-
-Per-workspace config file: `<workspace>/.sandboxforge.toml` (legacy `.orbitforge.toml` and `.lima-mcp.toml` still supported)  
-Optional global defaults: `~/.config/sandboxforge-mcp/config.toml` (legacy `~/.config/orbitforge-mcp/config.toml` and `~/.config/lima-mcp/config.toml` still supported)
-
-Precedence:
+## Configuration
+Workspace config files (precedence high -> low):
 1. Request overrides
-2. Workspace file
-3. Global file
+2. `<workspace>/.sandboxforge.toml`
+3. `~/.config/sandboxforge-mcp/config.toml`
 4. Built-in defaults
 
-Default VM shape:
-- `cpus = 1`
-- `memory_gib = 2.0`
-- `disk_gib = 15.0`
-- `vm_type = "vz"` on macOS, `vm_type = "qemu"` on Linux, `vm_type = null` on other hosts
+Legacy config files still supported:
+- Workspace: `.orbitforge.toml`, `.lima-mcp.toml`
+- Global: `~/.config/orbitforge-mcp/config.toml`, `~/.config/lima-mcp/config.toml`
+
+Default VM config:
 - `template = "template:docker"`
+- `vm_type = "vz"` on macOS
+- `vm_type = "qemu"` on Linux
+- `vm_type = null` on other hosts
 
-Infra defaults:
-- `infra.ensure_network = true`
-- `infra.bridge_to_compose_network = true`
-- `infra.include_services_by_default = true`
-- `infra.network_name = null` (set this for exact network name without instance suffix)
-- `infra.mysql.extra_env = {}`
-- `infra.redis.extra_env = {}`
-- `infra.mysql.inject_env_to = ".env"`
-- `infra.redis.inject_env_to = ".env"`
-
-Notes:
-- `prepare_workspace` returns writable workspace path hints in VM (`workspace_paths.preferred`).
-- `create_instance(..., wait_for_ready=true)` and `prepare_workspace(..., wait_for_ready=true)` wait for MySQL/Redis readiness.
-- `docker_compose` supports `restart`, `stop`, and `exec`, plus logs flags (`follow`, `since`, `tail`).
-- `docker_compose` now exports inferred infra connection env (`DB_HOST`, `REDIS_URL`, etc.) during compose commands.
-- `docker_build` embeds git/dependency/build metadata labels and supports cache-aware reuse.
-
-## Image Validation and Caching
-
-New tool:
-- `validate_image(instance_id, image_name, workspace_root?, checks?)`
-
-`docker_build` rollout:
-- Computes workspace state (`git`, dependency hash, content hash)
-- Derives expected cached tag from `[build.image_caching]`
-- Reuses cached image when validation succeeds
-- Falls back to fresh build when stale/missing
-- Applies metadata build args and labels automatically
-
-Example config:
-
-```toml
-[build.prebuilt]
-enabled = true
-validation = "strict"
-
-[build.prebuilt.staleness_check]
-check_git_commit = true
-check_dependencies = true
-check_age_threshold = "24h"
-on_stale = "rebuild"
-
-[build.image_caching]
-enabled = true
-strategy = "smart" # content_hash | git_commit | smart
-tag_format = "{image}:{git_short}-{deps_hash}"
-```
+For full schema and examples, see `docs/SETUP.md` and `src/lima_mcp_server/workspace_config.py`.
 
 ## Environment Variables
-
+Core server:
 - `MCP_HTTP_HOST` (default `127.0.0.1`)
-- `MCP_HTTP_ALLOW_NON_LOOPBACK` (default `0`; set `1` to allow hosts like `0.0.0.0`)
+- `MCP_HTTP_ALLOW_NON_LOOPBACK` (default `0`)
 - `MCP_HTTP_PORT` (default `8765`)
+- `MCP_ENABLE_HTTP` (default `1`)
 - `LEASE_DB_PATH` (default `state/leases.db`)
+- `MAX_INSTANCES` (default `3`)
+- `DEFAULT_TTL_MINUTES` (default `30`)
+- `MAX_TTL_MINUTES` (default `120`)
 - `SANDBOX_SWEEPER_INTERVAL_SECONDS` (default `60`)
+
+Backend selection:
 - `SANDBOX_BACKEND` (`auto`, `lima`, `hyperv`; default `auto`)
+
+Hyper-V backend:
 - `HYPERV_SWITCH_NAME` (default `Default Switch`)
-- `HYPERV_BASE_VHDX` (required for Hyper-V backend)
+- `HYPERV_BASE_VHDX` (**required** for Hyper-V)
 - `HYPERV_STORAGE_DIR` (default `state/hyperv`)
 - `HYPERV_SSH_USER` (default `ubuntu`)
 - `HYPERV_SSH_KEY_PATH` (optional)
 - `HYPERV_SSH_PORT` (default `22`)
 - `HYPERV_BOOT_TIMEOUT_SECONDS` (default `180`)
 
-## License
+## Windows Notes
+- v1 supports **native Windows host runtime**, not WSL2-hosted server runtime
+- `HYPERV_BASE_VHDX` must reference an existing base image
+- OpenSSH client (`ssh`, `scp`) must be available in `PATH`
+- On native Windows runtime, `workspace_root` must be a Windows path
 
-MIT. See [LICENSE](LICENSE).
+## Docker Deployment
+Build and run via helper script:
+```bash
+./scripts/docker-deploy.sh deploy
+```
+
+Or with Make:
+```bash
+make docker-up
+```
+
+Useful operations:
+```bash
+./scripts/docker-deploy.sh logs
+./scripts/docker-deploy.sh ps
+./scripts/docker-deploy.sh down
+```
+
+## Development
+Run tests:
+```bash
+uv run pytest -q
+```
+
+Integration test gates:
+- Lima: `RUN_LIMA_INTEGRATION=1`
+- Hyper-V: `RUN_HYPERV_INTEGRATION=1` (Windows host)
+
+## Migration Notes (v1 Breaking)
+This project now uses backend-neutral API naming.
+
+Breaking changes from pre-v1:
+- Tool rename: `lima_validate_image` -> `validate_image`
+- Response/storage field rename: `lima_name` -> `backend_instance_name`
+- Error code rename: `LIMA_COMMAND_FAILED` -> `BACKEND_COMMAND_FAILED`
+- Env var rename: `LIMA_SWEEPER_INTERVAL_SECONDS` -> `SANDBOX_SWEEPER_INTERVAL_SECONDS`
+
+## Troubleshooting
+- `BACKEND_UNAVAILABLE`:
+  - Verify backend prerequisites for your host
+  - Confirm selected backend via `SANDBOX_BACKEND`
+- Linux Lima failures around KVM/QEMU:
+  - Install host virtualization dependencies required by Lima
+- Windows Hyper-V failures:
+  - Confirm `Get-Command New-VM` and `Get-Command New-VHD`
+  - Confirm `HYPERV_BASE_VHDX` exists and is readable
+
+## Related Docs
+- Setup: `docs/SETUP.md`
+- Project structure: `docs/PROJECT_STRUCTURE.md`
+- Coding constraints: `docs/CODING_STANDARDS.md`
+- Contributor guide: `CONTRIBUTING.md`
+- Changelog: `CHANGELOG.md`
+- Security: `SECURITY.md`
+- Agent orientation: `AGENTS.md`
+
+## License
+MIT. See `LICENSE`.
