@@ -18,6 +18,7 @@ Inside each VM, SandboxForge can bootstrap Docker/Compose workloads, run command
 - [Requirements](#requirements)
 - [Quick Start (Local Host Runtime)](#quick-start-local-host-runtime)
 - [Connect Your MCP Client](#connect-your-mcp-client)
+- [IDE Integration Examples](#ide-integration-examples)
 - [Hello World (First End-to-End Flow)](#hello-world-first-end-to-end-flow)
 - [Tool Surface](#tool-surface)
 - [Configuration](#configuration)
@@ -27,6 +28,7 @@ Inside each VM, SandboxForge can bootstrap Docker/Compose workloads, run command
 - [Troubleshooting and Error Rectification](#troubleshooting-and-error-rectification)
 - [Migration Notes (v1 Breaking)](#migration-notes-v1-breaking)
 - [Related Docs](#related-docs)
+- [Acknowledgements](#acknowledgements)
 - [License](#license)
 
 ## Why SandboxForge MCP
@@ -182,6 +184,72 @@ Notes:
 - `http://127.0.0.1:8765/` returns `404` by design
 - `http://127.0.0.1:8765/mcp` is the MCP endpoint
 
+## IDE Integration Examples
+Integration references:
+- [Setup Guide](docs/SETUP.md)
+- [Sample Workspace Walkthrough](examples/sample-workspace/README.md)
+- [Model Context Protocol](https://modelcontextprotocol.io/)
+- [Cursor Docs](https://docs.cursor.com/)
+
+### Cursor (stdio mode)
+Use when Cursor should launch the server process:
+
+```json
+{
+  "mcpServers": {
+    "sandboxforge": {
+      "command": "uv",
+      "args": ["run", "sandboxforge-mcp-server"],
+      "cwd": "/absolute/path/to/SandboxMCP"
+    }
+  }
+}
+```
+
+Fallback if entrypoint resolution fails:
+
+```json
+{
+  "mcpServers": {
+    "sandboxforge": {
+      "command": "uv",
+      "args": ["run", "python", "-m", "lima_mcp_server.server"],
+      "cwd": "/absolute/path/to/SandboxMCP"
+    }
+  }
+}
+```
+
+### Cursor or Multiple IDEs (shared HTTP server, recommended)
+Use when multiple clients/agents must share one server and avoid duplicate instances:
+
+1. Start server once on host:
+
+```bash
+cd /absolute/path/to/SandboxMCP
+uv run python -m lima_mcp_server.server
+```
+
+2. Point each IDE/client to the same endpoint:
+
+```json
+{
+  "mcpServers": {
+    "sandboxforge": {
+      "transport": "streamable-http",
+      "url": "http://127.0.0.1:8765/mcp"
+    }
+  }
+}
+```
+
+### Other MCP-compatible IDEs/clients
+Use the same JSON shape (`mcpServers`) with either:
+- `command` + `args` (stdio), or
+- `transport: "streamable-http"` + `url` (shared server)
+
+This keeps integration consistent across Cursor and other IDE extensions/agents that support MCP.
+
 ## Hello World (First End-to-End Flow)
 After connecting your client, run this flow against a local workspace path:
 
@@ -323,6 +391,14 @@ For a copyable real workspace setup:
 - Changelog: `CHANGELOG.md`
 - Security: `SECURITY.md`
 - Agent orientation: `AGENTS.md`
+
+## Acknowledgements
+- [Model Context Protocol](https://modelcontextprotocol.io/) for the open protocol foundation.
+- [Python MCP SDK](https://github.com/modelcontextprotocol/python-sdk) that powers server/tool wiring.
+- [Lima](https://lima-vm.io/) for macOS/Linux VM lifecycle primitives used by the Lima backend.
+- [Microsoft Hyper-V](https://learn.microsoft.com/windows-server/virtualization/hyper-v/) and OpenSSH tooling used by the Windows backend.
+- [Docker](https://www.docker.com/) and [Docker Compose](https://docs.docker.com/compose/) for in-guest workload runtime.
+- [uv](https://github.com/astral-sh/uv) for fast Python environment and workflow management.
 
 ## License
 MIT. See `LICENSE`.
