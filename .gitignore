@@ -22,3 +22,6 @@ venv/
 state/leases.db
 state/tasks/
 !state/.gitkeep
+
+# Generated sample workspace env from prepare_workspace
+examples/sample-workspace/.env

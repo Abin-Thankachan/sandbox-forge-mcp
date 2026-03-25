@@ -5,6 +5,7 @@ import subprocess
 
 import pytest
 
+from lima_mcp_server.backend.base import BackendCommandError
 from lima_mcp_server.backend.lima import LimaBackend, VmCreateSpec, _parse_limactl_list_json
 
 
@@ -92,6 +93,49 @@ def test_parse_limactl_list_json_ndjson_lines() -> None:
 def test_parse_limactl_list_json_wrapped_instances_key() -> None:
     out = _parse_limactl_list_json('{"instances": [{"name": "x"}]}')
     assert out == [{"name": "x"}]
+
+
+def test_parse_limactl_list_json_raises_on_partial_malformed_ndjson() -> None:
+    ndjson = '{"name":"vm1"}\n{"name":"vm2"\n'
+    with pytest.raises(ValueError):
+        _parse_limactl_list_json(ndjson)
+
+
+def test_list_instances_parses_ndjson_output(monkeypatch: pytest.MonkeyPatch) -> None:
+    recorder = Recorder()
+
+    def fake_run(args, capture_output, text, timeout, check):  # noqa: ANN001
+        recorder.calls.append(list(args))
+        if args == ["limactl", "--version"]:
+            return subprocess.CompletedProcess(args=args, returncode=0, stdout="limactl 2.1.0\n", stderr="")
+        if args[:3] == ["limactl", "list", "--format"]:
+            stdout = '{"name":"vm1","status":"Running"}\n{"name":"vm2","status":"Stopped"}\n'
+            return subprocess.CompletedProcess(args=args, returncode=0, stdout=stdout, stderr="")
+        return subprocess.CompletedProcess(args=args, returncode=0, stdout="", stderr="")
+
+    monkeypatch.setattr(shutil, "which", lambda _: "/usr/local/bin/limactl")
+    monkeypatch.setattr(subprocess, "run", fake_run)
+
+    backend = LimaBackend()
+    out = backend.list_instances()
+    assert [item.get("name") for item in out] == ["vm1", "vm2"]
+
+
+def test_list_instances_raises_on_malformed_ndjson(monkeypatch: pytest.MonkeyPatch) -> None:
+    def fake_run(args, capture_output, text, timeout, check):  # noqa: ANN001
+        if args == ["limactl", "--version"]:
+            return subprocess.CompletedProcess(args=args, returncode=0, stdout="limactl 2.1.0\n", stderr="")
+        if args[:3] == ["limactl", "list", "--format"]:
+            stdout = '{"name":"vm1"}\n{"name":"vm2"\n'
+            return subprocess.CompletedProcess(args=args, returncode=0, stdout=stdout, stderr="")
+        return subprocess.CompletedProcess(args=args, returncode=0, stdout="", stderr="")
+
+    monkeypatch.setattr(shutil, "which", lambda _: "/usr/local/bin/limactl")
+    monkeypatch.setattr(subprocess, "run", fake_run)
+
+    backend = LimaBackend()
+    with pytest.raises(BackendCommandError, match="Failed to parse limactl list JSON"):
+        backend.list_instances()
 
 
 def test_backend_unavailable_when_limactl_missing(monkeypatch: pytest.MonkeyPatch) -> None:

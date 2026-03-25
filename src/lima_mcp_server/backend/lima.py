@@ -25,18 +25,20 @@ def _parse_limactl_list_json(stdout: str) -> list[dict[str, Any]]:
     except json.JSONDecodeError:
         instances: list[dict[str, Any]] = []
         errors: list[str] = []
-        for line in text.splitlines():
+        for line_no, line in enumerate(text.splitlines(), start=1):
             line = line.strip()
             if not line:
                 continue
             try:
                 obj = json.loads(line)
             except json.JSONDecodeError as exc:
-                errors.append(str(exc))
+                errors.append(f"line {line_no}: {exc}")
                 continue
-            if isinstance(obj, dict):
-                instances.append(obj)
-        if errors and not instances:
+            if not isinstance(obj, dict):
+                errors.append(f"line {line_no}: expected object, got {type(obj).__name__}")
+                continue
+            instances.append(obj)
+        if errors:
             raise ValueError("; ".join(errors))
         return instances
 
