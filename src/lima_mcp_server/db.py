@@ -93,6 +93,11 @@ class LeaseStore:
                     WHERE backend_instance_name IS NULL OR backend_instance_name = ''
                     """
                 )
+                # Legacy schema required lima_name NOT NULL; new inserts only set backend_instance_name.
+                try:
+                    conn.execute("ALTER TABLE leases DROP COLUMN lima_name")
+                except sqlite3.OperationalError:
+                    pass
             if not self._has_column(conn, "leases", "runtime_name"):
                 conn.execute("ALTER TABLE leases ADD COLUMN runtime_name TEXT")
             if not self._has_column(conn, "leases", "runtime_ready"):

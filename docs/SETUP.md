@@ -1,8 +1,14 @@
 # Setup Guide
 
-This guide is the standard setup path for contributors.
+This guide covers local setup, MCP client connection, first successful flow, and common error rectifications.
 
-## 1. Prerequisites
+## 1. Runtime Requirement
+
+Run the MCP server directly on the host OS (macOS/Linux/Windows native).
+
+Docker-hosted MCP server runtime is not supported for normal operation because host workspace paths and backend virtualization tooling may not be visible in-container.
+
+## 2. Prerequisites
 
 - macOS, Linux, or Windows
 - Python 3.11+
@@ -10,7 +16,7 @@ This guide is the standard setup path for contributors.
 
 Backend prerequisites:
 - macOS/Linux: Lima (`limactl`) in `PATH`
-- Windows: Hyper-V PowerShell cmdlets (`New-VM`, `New-VHD`) and OpenSSH client (`ssh`, `scp`)
+- Windows: Hyper-V cmdlets (`New-VM`, `New-VHD`) and OpenSSH client (`ssh`, `scp`)
 
 On macOS (Homebrew):
 
@@ -18,7 +24,7 @@ On macOS (Homebrew):
 brew install uv lima
 ```
 
-On Linux (example package sources vary by distro):
+On Linux (package sources vary by distro):
 
 ```bash
 # install uv (https://docs.astral.sh/uv/getting-started/installation/)
@@ -36,16 +42,15 @@ scp -V
 ```
 
 Host defaults:
-- macOS uses `vm.vm_type = "vz"` by default.
-- Linux uses `vm.vm_type = "qemu"` by default.
+- macOS uses `vm.vm_type = "vz"`
+- Linux uses `vm.vm_type = "qemu"`
 
 Important:
 - Host VM tooling is not auto-installed by this project.
-- On Linux, install distro-specific Lima prerequisites yourself (including any required QEMU/KVM components).
-- On Windows, configure Hyper-V and set `HYPERV_BASE_VHDX` to an existing base image path.
-- This project can auto-install Docker inside the created VM during workspace bootstrap, but it does not provision host virtualization dependencies.
+- Linux users must install distro-specific Lima prerequisites (including required QEMU/KVM packages).
+- Windows users must set `HYPERV_BASE_VHDX` to an existing base image path.
 
-## 2. Clone and Install
+## 3. Clone and Install
 
 ```bash
 git clone <your-fork-or-repo-url>
@@ -53,30 +58,87 @@ cd SandboxMCP
 uv sync --extra dev
 ```
 
-## 3. Run Tests
-
-```bash
-uv run pytest -q
-```
-
-If a dependency is missing in your environment, install it via `uv sync --extra dev` and rerun.
-
-## 4. Run the Server
+## 4. Run the Server Locally (Host Runtime)
 
 ```bash
 uv run sandboxforge-mcp-server
 ```
 
-## 5. Verify Tooling Quickly
+Fallback entrypoint (if script resolution fails):
 
-Use a quick smoke flow:
+```bash
+uv run python -m lima_mcp_server.server
+```
 
-1. `validate_workspace_config` on your workspace
-2. `create_instance(..., auto_bootstrap=true, wait_for_ready=true)`
-3. `prepare_workspace(..., wait_for_ready=true)` if needed
-4. `list_instances` and check `runtime_ready = true`
+## 5. Connect Your MCP Client
 
-## 6. Optional: Enable Strict Prebuilt Image Validation
+### A. Local stdio connection (recommended)
+
+```json
+{
+  "mcpServers": {
+    "sandboxforge": {
+      "command": "uv",
+      "args": ["run", "sandboxforge-mcp-server"],
+      "cwd": "/absolute/path/to/SandboxMCP"
+    }
+  }
+}
+```
+
+If your client shows `Failed to spawn: sandboxforge-mcp-server`:
+
+```json
+{
+  "mcpServers": {
+    "sandboxforge": {
+      "command": "uv",
+      "args": ["run", "python", "-m", "lima_mcp_server.server"],
+      "cwd": "/absolute/path/to/SandboxMCP"
+    }
+  }
+}
+```
+
+### B. Streamable HTTP connection
+
+Server endpoint:
+- `http://127.0.0.1:8765/mcp`
+
+Config example:
+
+```json
+{
+  "mcpServers": {
+    "sandboxforge-http": {
+      "transport": "streamable-http",
+      "url": "http://127.0.0.1:8765/mcp"
+    }
+  }
+}
+```
+
+Notes:
+- `GET /` returns `404` (expected)
+- `/mcp` is the MCP endpoint
+- Plain curl may show `406 Not Acceptable` unless MCP streamable HTTP headers are used
+
+## 6. First Successful End-to-End Flow
+
+Run this sequence from your MCP client:
+
+1. `validate_workspace_config(workspace_root="/abs/path/to/workspace")`
+2. `create_instance(workspace_root="/abs/path/to/workspace", auto_bootstrap=true, wait_for_ready=true)`
+3. `prepare_workspace(instance_id="<id>", wait_for_ready=true)`
+4. `run_command(instance_id="<id>", command="echo hello-from-sandbox && uname -a")`
+5. `destroy_instance(instance_id="<id>")`
+
+Success markers:
+- `create_instance` returns an `instance_id`
+- `prepare_workspace` returns `runtime_ready = true`
+- `run_command` exits with code `0`
+
+## 7. Optional: Strict Prebuilt Image Validation
 
 Create/update `<workspace>/.sandboxforge.toml`:
 
@@ -103,32 +165,41 @@ bridge_to_compose_network = true
 
 Then use:
 - `validate_image(...)` before test runs
-- `docker_build(...)` for auto cache hit/miss + metadata labels
+- `docker_build(...)` for cache hit/miss + metadata labels
 
-## 7. Common Troubleshooting
+## 8. Common Troubleshooting and Rectification
 
-## `limactl not found in PATH`
+### `Failed to spawn: sandboxforge-mcp-server`
+- Ensure dependencies are installed: `uv sync --extra dev`
+- Verify command works in repo root: `uv run sandboxforge-mcp-server --help`
+- Use fallback: `uv run python -m lima_mcp_server.server`
+- Ensure MCP client `cwd` points to this repository root
 
-- Confirm install: `limactl --version`
-- Ensure shell profile exports the correct PATH
+### `BACKEND_UNAVAILABLE`
+- Verify backend prerequisites for your host
+- Confirm `SANDBOX_BACKEND` selection (`auto|lima|hyperv`)
+- macOS/Linux: check `limactl --version`
+- Windows: check `Get-Command New-VM`, `Get-Command New-VHD`, and OpenSSH availability
 
-## Hyper-V cmdlets unavailable
+### Docker-hosted MCP runtime attempted
+- Symptom: host workspace paths fail (`/Users/...` not found) or backend is unavailable
+- Fix: run server on host OS and reconnect MCP client using local stdio or host HTTP endpoint
 
-- Confirm Hyper-V feature is enabled on Windows.
-- Verify with: `Get-Command New-VM` and `Get-Command New-VHD`.
-- Ensure `HYPERV_BASE_VHDX` points to an existing `.vhdx` base image.
+### `GET /` works but MCP calls fail
+- Use `http://127.0.0.1:8765/mcp`, not root `/`
+- Ensure your MCP client is using Streamable HTTP transport
 
-## `create_instance` appears hung
+### Old env var still used
+- Replace `LIMA_SWEEPER_INTERVAL_SECONDS` with `SANDBOX_SWEEPER_INTERVAL_SECONDS`
 
-- Recent versions include operation timeouts; check the returned structured error.
-- Run `list_instances` to verify whether creation succeeded before timeout.
+### `create_instance` appears hung
+- Newer versions include operation timeouts in structured errors
+- Run `list_instances` to check whether creation completed
 
-## Docker-compose app cannot reach MySQL/Redis
+### Dockerized app cannot reach MySQL/Redis
+- Set `infra.bridge_to_compose_network = true` in workspace config
+- Use provided `docker_compose` tool for compose operations
 
-- Ensure `infra.bridge_to_compose_network = true` in `.sandboxforge.toml`.
-- Run compose using the provided `docker_compose` tool (it handles bridge flow).
-
-## Sync permission denied on `/workspace`
-
-- Use `prepare_workspace` output: `workspace_paths.preferred`.
-- Default fallback remains `/tmp/workspace`.
+### Sync permission denied on `/workspace`
+- Use `prepare_workspace` output (`workspace_paths.preferred`)
+- Fallback path remains `/tmp/workspace`

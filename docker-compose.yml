@@ -12,7 +12,9 @@ services:
       MCP_HTTP_ALLOW_NON_LOOPBACK: "1"
       MCP_HTTP_PORT: "8765"
       LEASE_DB_PATH: "/app/state/leases.db"
-      LIMA_SWEEPER_INTERVAL_SECONDS: "60"
+      SANDBOX_SWEEPER_INTERVAL_SECONDS: "60"
+    stdin_open: true
+    tty: true
     ports:
       - "8765:8765"
     volumes:

@@ -1,0 +1,68 @@
+[vm]
+cpus = 2
+memory_gib = 4.0
+disk_gib = 25.0
+template = "template:docker"
+
+[docker]
+install_if_missing = true
+
+[build]
+enable_buildkit = true
+min_free_gib = 3.0
+
+[build.prebuilt]
+enabled = true
+validation = "strict"
+
+[build.prebuilt.staleness_check]
+check_git_commit = true
+check_dependencies = true
+check_age_threshold = "24h"
+on_stale = "rebuild"
+
+[build.image_caching]
+enabled = true
+strategy = "smart"
+tag_format = "{image}:{git_short}-{deps_hash}"
+
+[build.staleness_detection]
+check_git_commit = true
+check_git_dirty = true
+check_dependencies = ["app/requirements.txt", "Dockerfile"]
+check_dockerfile = true
+max_age_threshold = "24h"
+on_stale = "rebuild"
+on_dirty_workspace = "warn_and_rebuild"
+on_missing = "build"
+
+[infra]
+ensure_network = true
+bridge_to_compose_network = true
+include_services_by_default = true
+network_name_prefix = "sample-net"
+
+[infra.mysql]
+enabled = true
+image = "mysql:8.0"
+root_password = "root"
+database = "app"
+container_name_prefix = "sample-mysql"
+inject_env_to = ".env"
+
+[infra.redis]
+enabled = true
+image = "redis:7-alpine"
+container_name_prefix = "sample-redis"
+inject_env_to = ".env"
+
+[sync]
+include_git = false
+exclude_patterns = [
+  ".venv",
+  ".venv/**",
+  "__pycache__",
+  "__pycache__/**",
+  ".pytest_cache",
+  ".pytest_cache/**"
+]

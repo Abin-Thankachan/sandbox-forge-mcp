@@ -1,0 +1,10 @@
+services:
+  api:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    image: sample-workspace-api:dev
+    ports:
+      - "8000:8000"
+    environment:
+      APP_ENV: development
