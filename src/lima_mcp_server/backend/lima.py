@@ -10,6 +10,47 @@ from typing import Any
 from .base import BackendCommandError, BackendUnavailableError, CommandResult, VmCreateSpec
 
 
+def _parse_limactl_list_json(stdout: str) -> list[dict[str, Any]]:
+    """Parse `limactl list --format json` output.
+
+    Lima 2.1+ emits one JSON object per line (NDJSON). Older releases emitted a
+    single JSON array or object.
+    """
+    text = stdout.strip()
+    if not text:
+        return []
+
+    try:
+        parsed: Any = json.loads(text)
+    except json.JSONDecodeError:
+        instances: list[dict[str, Any]] = []
+        errors: list[str] = []
+        for line in text.splitlines():
+            line = line.strip()
+            if not line:
+                continue
+            try:
+                obj = json.loads(line)
+            except json.JSONDecodeError as exc:
+                errors.append(str(exc))
+                continue
+            if isinstance(obj, dict):
+                instances.append(obj)
+        if errors and not instances:
+            raise ValueError("; ".join(errors))
+        return instances
+
+    if isinstance(parsed, dict):
+        if "instances" in parsed and isinstance(parsed["instances"], list):
+            return [x for x in parsed["instances"] if isinstance(x, dict)]
+        return [parsed]
+
+    if isinstance(parsed, list):
+        return [x for x in parsed if isinstance(x, dict)]
+
+    return []
+
+
 class LimaBackend:
     backend_name = "lima"
 
@@ -117,8 +158,8 @@ class LimaBackend:
             return []
 
         try:
-            parsed = json.loads(result.stdout)
-        except json.JSONDecodeError as exc:
+            return _parse_limactl_list_json(result.stdout)
+        except ValueError as exc:
             raise BackendCommandError(
                 command=result.args,
                 exit_code=result.exit_code,
@@ -127,16 +168,6 @@ class LimaBackend:
                 duration_ms=result.duration_ms,
                 message=f"Failed to parse limactl list JSON: {exc}",
             ) from exc
-
-        if isinstance(parsed, dict):
-            if "instances" in parsed and isinstance(parsed["instances"], list):
-                return parsed["instances"]
-            return [parsed]
-
-        if isinstance(parsed, list):
-            return parsed
-
-        return []
 
     def build_shell_command_args(self, backend_instance_name: str, command: str) -> list[str]:
         return ["limactl", "shell", backend_instance_name, "--", "sh", "-lc", command]

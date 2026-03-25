@@ -5,7 +5,7 @@ import subprocess
 
 import pytest
 
-from lima_mcp_server.backend.lima import LimaBackend, VmCreateSpec
+from lima_mcp_server.backend.lima import LimaBackend, VmCreateSpec, _parse_limactl_list_json
 
 
 class Recorder:
@@ -76,6 +76,22 @@ def test_create_instance_uses_vm_spec(monkeypatch: pytest.MonkeyPatch) -> None:
     assert "--arch=aarch64" in create_cmd
     assert "--vm-type=vz" in create_cmd
     assert create_cmd[-1] == "template:docker"
+
+
+def test_parse_limactl_list_json_single_array() -> None:
+    out = _parse_limactl_list_json('[{"name": "a"}, {"name": "b"}]')
+    assert [x.get("name") for x in out] == ["a", "b"]
+
+
+def test_parse_limactl_list_json_ndjson_lines() -> None:
+    ndjson = '{"name":"vm1","status":"Running"}\n{"name":"vm2","status":"Stopped"}\n'
+    out = _parse_limactl_list_json(ndjson)
+    assert [x.get("name") for x in out] == ["vm1", "vm2"]
+
+
+def test_parse_limactl_list_json_wrapped_instances_key() -> None:
+    out = _parse_limactl_list_json('{"instances": [{"name": "x"}]}')
+    assert out == [{"name": "x"}]
 
 
 def test_backend_unavailable_when_limactl_missing(monkeypatch: pytest.MonkeyPatch) -> None:
