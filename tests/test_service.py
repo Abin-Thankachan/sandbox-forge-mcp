@@ -3,6 +3,8 @@ from __future__ import annotations
 from dataclasses import dataclass
 from pathlib import Path
 
+import pytest
+
 from lima_mcp_server.backend.lima import BackendCommandError, CommandResult, VmCreateSpec
 from lima_mcp_server.config import ServerConfig
 from lima_mcp_server.db import LeaseStore
@@ -63,7 +65,16 @@ class FakeBackend:
 def make_service(tmp_path: Path, backend: FakeBackend | None = None) -> LeaseService:
     cfg = ServerConfig(db_path=tmp_path / "leases.db")
     store = LeaseStore(cfg.db_path)
-    return LeaseService(store=store, backend=backend or FakeBackend(), config=cfg)
+    service = LeaseService(store=store, backend=backend or FakeBackend(), config=cfg)
+    service._host_cpu_count = lambda: 8  # type: ignore[method-assign]
+    service._host_available_memory_gib = lambda: 32.0  # type: ignore[method-assign]
+    service._host_free_disk_gib = lambda _workspace_root: 100.0  # type: ignore[method-assign]
+    return service
+
+
+def make_unstubbed_service(tmp_path: Path, backend: FakeBackend | None = None) -> LeaseService:
+    cfg = ServerConfig(db_path=tmp_path / "leases.db")
+    return LeaseService(store=LeaseStore(cfg.db_path), backend=backend or FakeBackend(), config=cfg)
 
 
 def test_create_instance_success_path(tmp_path: Path) -> None:
@@ -185,3 +196,88 @@ def test_create_instance_dependency_failure_returns_guided_message(tmp_path: Pat
     guidance = result["details"]["guidance"]
     assert guidance["probable_cause"] == "host_vm_dependency_missing"
     assert any("QEMU" in step for step in guidance["next_steps"])
+
+
+def test_create_instance_blocks_when_host_cpu_is_insufficient(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    backend = FakeBackend()
+    service = make_service(tmp_path, backend)
+    (tmp_path / ".sandboxforge.toml").write_text("[vm]\ncpus = 2\n")
+    monkeypatch.setattr(service, "_host_cpu_count", lambda: 1)
+
+    result = service.create_instance(workspace_root=str(tmp_path), ttl_minutes=30, auto_bootstrap=False)
+
+    assert result["error_code"] == "INSUFFICIENT_HOST_RESOURCES"
+    assert "cpu" in result["details"]["failed_checks"]
+    assert backend.calls == []
+
+
+def test_create_instance_blocks_when_host_memory_is_insufficient(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    backend = FakeBackend()
+    service = make_service(tmp_path, backend)
+    monkeypatch.setattr(service, "_host_available_memory_gib", lambda: 2.2)
+
+    result = service.create_instance(workspace_root=str(tmp_path), ttl_minutes=30, auto_bootstrap=False)
+
+    assert result["error_code"] == "INSUFFICIENT_HOST_RESOURCES"
+    assert "memory" in result["details"]["failed_checks"]
+    assert result["details"]["required_headroom"]["minimum_available_memory_gib"] == 2.5
+    assert backend.calls == []
+
+
+def test_create_instance_blocks_when_host_disk_is_insufficient(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    backend = FakeBackend()
+    service = make_service(tmp_path, backend)
+    monkeypatch.setattr(service, "_host_free_disk_gib", lambda _workspace_root: 16.0)
+
+    result = service.create_instance(workspace_root=str(tmp_path), ttl_minutes=30, auto_bootstrap=False)
+
+    assert result["error_code"] == "INSUFFICIENT_HOST_RESOURCES"
+    assert "disk" in result["details"]["failed_checks"]
+    assert result["details"]["required_headroom"]["minimum_free_disk_gib"] == 17.0
+    assert backend.calls == []
+
+
+def test_memory_probe_linux_uses_memavailable(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    service = make_unstubbed_service(tmp_path)
+    monkeypatch.setattr(service, "_host_platform", lambda: "linux")
+    monkeypatch.setattr(
+        service,
+        "_read_linux_meminfo",
+        lambda: "MemTotal: 8000000 kB\nMemAvailable: 3145728 kB\nMemFree: 1024 kB\n",
+    )
+
+    value = service._host_available_memory_gib()
+    assert value == pytest.approx(3.0, rel=1e-6)
+
+
+def test_memory_probe_darwin_uses_vm_stat(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    service = make_unstubbed_service(tmp_path)
+    monkeypatch.setattr(service, "_host_platform", lambda: "darwin")
+
+    def fake_run(args: list[str], cwd: str | None = None, timeout_seconds: int = 10) -> tuple[int, str, str]:  # noqa: ARG001
+        output = (
+            "Mach Virtual Memory Statistics: (page size of 4096 bytes)\n"
+            "Pages free: 131072.\n"
+            "Pages inactive: 131072.\n"
+            "Pages speculative: 0.\n"
+        )
+        return 0, output, ""
+
+    monkeypatch.setattr(service, "_run_local_command", fake_run)
+
+    value = service._host_available_memory_gib()
+    assert value == pytest.approx(1.0, rel=1e-6)
+
+
+def test_memory_probe_windows_uses_freephysicalmemory(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    service = make_unstubbed_service(tmp_path)
+    monkeypatch.setattr(service, "_host_platform", lambda: "win32")
+    monkeypatch.setattr(service, "_powershell_binary", lambda: "powershell.exe")
+
+    def fake_run(args: list[str], cwd: str | None = None, timeout_seconds: int = 10) -> tuple[int, str, str]:  # noqa: ARG001
+        return 0, "2097152\n", ""
+
+    monkeypatch.setattr(service, "_run_local_command", fake_run)
+
+    value = service._host_available_memory_gib()
+    assert value == pytest.approx(2.0, rel=1e-6)

@@ -4,7 +4,9 @@ import fnmatch
 import hashlib
 import json
 import os
+import re
 import shlex
+import shutil
 import signal
 import subprocess
 import sys
@@ -36,6 +38,8 @@ DOCKER_ALLOWED_COMPOSE_ACTIONS = {"up", "down", "ps", "logs", "pull", "build", "
 TASK_TERMINAL_STATUSES = {"succeeded", "failed", "stopped"}
 DEFAULT_SERVICE_READY_TIMEOUT_SECONDS = 90
 DEFAULT_SERVICE_READY_POLL_SECONDS = 2
+DEFAULT_HOST_MEMORY_HEADROOM_GIB = 0.5
+DEFAULT_HOST_DISK_HEADROOM_GIB = 2.0
 
 
 class LeaseService:
@@ -394,6 +398,161 @@ class LeaseService:
             return completed.returncode, completed.stdout, completed.stderr
         except Exception as exc:
             return 1, "", str(exc)
+
+    def _host_platform(self) -> str:
+        return sys.platform.lower()
+
+    def _host_cpu_count(self) -> int | None:
+        count = os.cpu_count()
+        if isinstance(count, int) and count > 0:
+            return count
+        return None
+
+    def _read_linux_meminfo(self) -> str | None:
+        try:
+            return Path("/proc/meminfo").read_text(encoding="utf-8")
+        except OSError:
+            return None
+
+    def _parse_linux_available_memory_gib(self, content: str) -> float | None:
+        for key in ("MemAvailable", "MemFree"):
+            match = re.search(rf"^{key}:\s+(\d+)\s+kB$", content, flags=re.MULTILINE)
+            if match:
+                kib = int(match.group(1))
+                return kib / (1024 * 1024)
+        return None
+
+    def _parse_darwin_vm_stat_available_memory_gib(self, content: str) -> float | None:
+        page_size_match = re.search(r"page size of (\d+) bytes", content)
+        if not page_size_match:
+            return None
+
+        page_size = int(page_size_match.group(1))
+        total_pages = 0
+        for label in ("Pages free", "Pages inactive", "Pages speculative"):
+            stat_match = re.search(rf"^{label}:\s+(\d+)\.", content, flags=re.MULTILINE)
+            if not stat_match:
+                continue
+            total_pages += int(stat_match.group(1))
+
+        if total_pages <= 0:
+            return None
+        return (total_pages * page_size) / (1024**3)
+
+    def _powershell_binary(self) -> str | None:
+        for candidate in ("powershell.exe", "powershell", "pwsh"):
+            binary = shutil.which(candidate)
+            if binary:
+                return binary
+        return None
+
+    def _host_available_memory_gib(self) -> float | None:
+        platform_name = self._host_platform()
+        if platform_name.startswith("linux"):
+            meminfo = self._read_linux_meminfo()
+            if not meminfo:
+                return None
+            return self._parse_linux_available_memory_gib(meminfo)
+
+        if platform_name.startswith("darwin"):
+            rc, out, _ = self._run_local_command(["vm_stat"], timeout_seconds=5)
+            if rc == 0:
+                parsed = self._parse_darwin_vm_stat_available_memory_gib(out)
+                if parsed is not None:
+                    return parsed
+            return None
+
+        if platform_name.startswith("win"):
+            powershell = self._powershell_binary()
+            if not powershell:
+                return None
+            cmd = "(Get-CimInstance Win32_OperatingSystem).FreePhysicalMemory"
+            rc, out, _ = self._run_local_command([powershell, "-NoProfile", "-NonInteractive", "-Command", cmd], timeout_seconds=8)
+            if rc != 0:
+                return None
+            match = re.search(r"(\d+)", out)
+            if not match:
+                return None
+            kib = int(match.group(1))
+            return kib / (1024 * 1024)
+
+        return None
+
+    def _host_free_disk_gib(self, workspace_root: str) -> float | None:
+        try:
+            usage = shutil.disk_usage(workspace_root)
+            return usage.free / (1024**3)
+        except OSError:
+            return None
+
+    def _ensure_host_capacity_for_vm(self, settings: WorkspaceSettings) -> dict[str, Any] | None:
+        cpu_count = self._host_cpu_count()
+        memory_available_gib = self._host_available_memory_gib()
+        disk_free_gib = self._host_free_disk_gib(settings.workspace_root)
+
+        failed_checks: list[str] = []
+        required_memory_gib = settings.vm.memory_gib + DEFAULT_HOST_MEMORY_HEADROOM_GIB
+        required_disk_gib = settings.vm.disk_gib + DEFAULT_HOST_DISK_HEADROOM_GIB
+
+        if cpu_count is not None and settings.vm.cpus > cpu_count:
+            failed_checks.append("cpu")
+
+        if memory_available_gib is not None and memory_available_gib < required_memory_gib:
+            failed_checks.append("memory")
+
+        if disk_free_gib is not None and disk_free_gib < required_disk_gib:
+            failed_checks.append("disk")
+
+        if not failed_checks:
+            return None
+
+        suggested_memory_gib = settings.vm.memory_gib
+        if memory_available_gib is not None:
+            suggested_memory_gib = max(0.5, round(max(memory_available_gib - DEFAULT_HOST_MEMORY_HEADROOM_GIB, 0.5), 2))
+
+        suggested_disk_gib = settings.vm.disk_gib
+        if disk_free_gib is not None:
+            suggested_disk_gib = max(5.0, round(max(disk_free_gib - DEFAULT_HOST_DISK_HEADROOM_GIB, 5.0), 1))
+
+        suggested_cpus = settings.vm.cpus
+        if cpu_count is not None:
+            suggested_cpus = max(1, min(settings.vm.cpus, cpu_count))
+
+        config_path = Path(settings.workspace_root) / ".sandboxforge.toml"
+        return error_response(
+            "INSUFFICIENT_HOST_RESOURCES",
+            "Host capacity is too low for the requested VM shape",
+            {
+                "host_os": self._host_platform(),
+                "workspace_root": settings.workspace_root,
+                "workspace_config": str(config_path),
+                "requested_vm": {
+                    "cpus": settings.vm.cpus,
+                    "memory_gib": settings.vm.memory_gib,
+                    "disk_gib": settings.vm.disk_gib,
+                },
+                "available_host": {
+                    "cpu_count": cpu_count,
+                    "memory_available_gib": round(memory_available_gib, 3) if memory_available_gib is not None else None,
+                    "disk_free_gib": round(disk_free_gib, 3) if disk_free_gib is not None else None,
+                },
+                "required_headroom": {
+                    "minimum_available_memory_gib": round(required_memory_gib, 3),
+                    "minimum_free_disk_gib": round(required_disk_gib, 3),
+                },
+                "failed_checks": failed_checks,
+                "suggested_vm": {
+                    "cpus": suggested_cpus,
+                    "memory_gib": suggested_memory_gib,
+                    "disk_gib": suggested_disk_gib,
+                },
+                "next_steps": [
+                    f"Reduce vm.cpus, vm.memory_gib, or vm.disk_gib in {config_path}",
+                    "Close memory-heavy host applications and retry create_instance",
+                    "Retry with auto_bootstrap=false and include_services=false to reduce startup overhead",
+                ],
+            },
+        )
 
     def _hash_workspace_patterns(self, workspace_root: str, patterns: list[str]) -> str | None:
         root = Path(workspace_root)
@@ -765,6 +924,10 @@ class LeaseService:
                     "active_instances": active_count,
                 },
             )
+
+        host_capacity_error = self._ensure_host_capacity_for_vm(workspace_settings)
+        if host_capacity_error is not None:
+            return host_capacity_error
 
         instance_id, backend_instance_name = self._new_identifiers()
         expires_at = now + timedelta(minutes=ttl)

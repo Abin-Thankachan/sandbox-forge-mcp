@@ -181,6 +181,11 @@ Then use:
 - macOS/Linux: check `limactl --version`
 - Windows: check `Get-Command New-VM`, `Get-Command New-VHD`, and OpenSSH availability
 
+### `INSUFFICIENT_HOST_RESOURCES`
+- `create_instance` performs host-capacity checks before VM creation (CPU, available memory, free disk)
+- Reduce VM shape in `<workspace>/.sandboxforge.toml` (`vm.cpus`, `vm.memory_gib`, `vm.disk_gib`)
+- For low-spec machines, prefer `auto_bootstrap=false` and `prepare_workspace(..., include_services=false)`
+
 ### Docker-hosted MCP runtime attempted
 - Symptom: host workspace paths fail (`/Users/...` not found) or backend is unavailable
 - Fix: run server on host OS and reconnect MCP client using local stdio or host HTTP endpoint

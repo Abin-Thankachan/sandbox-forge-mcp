@@ -356,6 +356,11 @@ Non-goals:
 - macOS/Linux: verify `limactl --version`
 - Windows: verify `Get-Command New-VM`, `Get-Command New-VHD`, `ssh -V`
 
+### `INSUFFICIENT_HOST_RESOURCES`
+- `create_instance` now runs a host-capacity preflight for CPU, available memory, and free disk
+- If preflight fails, reduce `vm.cpus`, `vm.memory_gib`, or `vm.disk_gib` in `<workspace>/.sandboxforge.toml`
+- On low-spec hosts, start with `auto_bootstrap=false` and call `prepare_workspace(..., include_services=false)` to reduce startup overhead
+
 ### Docker-hosted MCP runtime is not supported
 - Run the MCP server directly on host OS (macOS/Linux/Windows native)
 - Keep Docker usage inside guest VM workloads (`docker_*` tools), not as server host runtime

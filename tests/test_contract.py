@@ -56,7 +56,11 @@ def parse_iso(ts: str) -> None:
 
 def make_service(tmp_path: Path) -> LeaseService:
     cfg = ServerConfig(db_path=tmp_path / "leases.db")
-    return LeaseService(LeaseStore(cfg.db_path), ContractBackend(), cfg)
+    service = LeaseService(LeaseStore(cfg.db_path), ContractBackend(), cfg)
+    service._host_cpu_count = lambda: 8  # type: ignore[method-assign]
+    service._host_available_memory_gib = lambda: 32.0  # type: ignore[method-assign]
+    service._host_free_disk_gib = lambda _workspace_root: 100.0  # type: ignore[method-assign]
+    return service
 
 
 def test_create_contract_keys_and_timestamps(tmp_path: Path) -> None:
